@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Causación de Facturas · Asistente Opus 4.6</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #0f172a; }
+  button:focus, select:focus, input:focus, textarea:focus { outline: 2px solid #3b82f6; outline-offset: 1px; }
+  .spin { animation: spin 1s linear infinite; display: inline-block; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+const CONFIG = {
+  LOGIN_URL:    "https://conaiassist.app.n8n.cloud/webhook/api/login",
+  FACTURAS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/facturas",
+  CAUSAR_URL:   "https://conaiassist.app.n8n.cloud/webhook/causar-factura",
+  DIAN_URL:     "https://catalogo-vpfe.dian.gov.co/User/SearchDocument",
+};
+
+const BODEGAS = ["Bodega Principal", "Bodega Secundaria", "Bodega Zona Norte", "Bodega Zona Sur", "Almacén Central"];
+const CUENTAS_CONTABLES = [
+  "2205 - Proveedores nacionales",
+  "2335 - Costos y gastos por pagar",
+  "2365 - Retención en la fuente",
+  "2367 - IVA retenido",
+  "5110 - Honorarios",
+  "5115 - Impuestos",
+  "5120 - Arrendamientos",
+  "5135 - Servicios",
+  "5195 - Diversos",
+  "6105 - Compra de mercancías",
+  "7105 - Costos de producción",
+];
+
+function LoginScreen({ onLogin }) {
+  const [nit, setNit] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    const nitLimpio = nit.replace(/\D/g, "");
+    if (!nitLimpio || nitLimpio.length < 6) {
+      setError("Ingresa un NIT válido");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(CONFIG.LOGIN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nit: nitLimpio }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      if (!data.valid) {
+        setError(data.error || "Empresa no registrada. Verifica el NIT.");
+        setLoading(false);
+        return;
+      }
+
+      onLogin(data);
+    } catch (err) {
+      setError("Error de conexión: " + err.message);
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, padding: 32, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600, marginBottom: 6 }}>ASISTENTE OPUS 4.6</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: "#0f172a" }}>Causación de Facturas</div>
+          <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Inicia sesión con el NIT de tu empresa</div>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
+            <input
+              type="text"
+              value={nit}
+              onChange={(e) => setNit(e.target.value)}
+              placeholder="Ej: 800456789"
+              autoFocus
+              disabled={loading}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }}
+            />
+          </div>
+
+          {error && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 16 }}>
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || !nit}
+            style={{
+              width: "100%", padding: "12px", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit ? "not-allowed" : "pointer",
+              background: loading || !nit ? "#94a3b8" : "#0f172a", color: "#fff",
+              opacity: loading || !nit ? 0.6 : 1,
+            }}
+          >
+            {loading ? <span><span className="spin">⟳</span> Verificando...</span> : "Ingresar"}
+          </button>
+        </form>
+
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #e2e8f0", fontSize: 11, color: "#94a3b8", textAlign: "center" }}>
+          ¿Tu empresa aún no está registrada? Completa el formulario de onboarding.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Badge({ status }) {
+  const S = {
+    APROBADA: { bg: "#dcfce7", color: "#166534", label: "Aprobada" },
+    APROBADA_AUTOMATICAMENTE: { bg: "#dbeafe", color: "#1e40af", label: "Auto-aprobada" },
+    RECHAZADA: { bg: "#fef2f2", color: "#991b1b", label: "Rechazada" },
+    CAUSADA: { bg: "#f0fdf4", color: "#14532d", label: "✓ Causada" },
+  };
+  const s = S[status] || { bg: "#fef3c7", color: "#92400e", label: status };
+  return <span style={{ background: s.bg, color: s.color, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{s.label}</span>;
+}
+
+function Risk({ level, score }) {
+  const c = { bajo: "#16a34a", medio: "#f59e0b", alto: "#ef4444" }[level] || "#6b7280";
+  return <span style={{ color: c, fontWeight: 600, fontSize: 12 }}>{score}/100 {(level || "").toUpperCase()}</span>;
+}
+
+function Field({ label, value, mono }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 13, color: "#0f172a", fontFamily: mono ? "'Courier New', monospace" : "inherit", wordBreak: mono ? "break-all" : "normal", lineHeight: 1.4 }}>
+        {value || "—"}
+      </div>
+    </div>
+  );
+}
+
+function SelectField({ label, value, opts, onChange, required }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>
+        {label} {required && <span style={{ color: "#ef4444" }}>*</span>}
+      </div>
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, background: "#fff", color: "#0f172a", cursor: "pointer", boxSizing: "border-box" }}>
+        <option value="">Seleccionar...</option>
+        {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function TaxLine({ label, amount, percent, warn }) {
+  if (!amount || amount <= 0) return null;
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, color: warn ? "#92400e" : "#475569" }}>
+      <span>{label}{percent > 0 ? ` (${percent}%)` : ""}</span>
+      <span style={{ fontWeight: 600 }}>{warn ? "-" : ""}${amount.toLocaleString("es-CO")}</span>
+    </div>
+  );
+}
+
+function InvoiceDetail({ inv, onCausar, onDian, dianOk }) {
+  const [bodega, setBodega] = useState("");
+  const [cuenta, setCuenta] = useState("");
+  const [notas, setNotas] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const retenciones = inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0;
+  const canCausar = bodega && cuenta && !saving;
+
+  const handleCausar = async () => {
+    setSaving(true);
+    try {
+      await onCausar(inv, { bodega, cuenta, notas });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ background: "#fff", padding: 20, borderTop: "1px solid #e2e8f0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
+        <Field label="RECEPTOR" value={inv.receptor} />
+        <Field label="NIT RECEPTOR" value={inv.receptor_nit} />
+        <Field label="MEDIO DE PAGO" value={inv.medio_pago || "No especificado"} />
+        <Field label="CATEGORÍA AI" value={`${inv.categoria || ""} / ${inv.subcategoria || "—"}`} />
+        <Field label="TIPO CONTABLE" value={inv.tipo_contable} />
+        <Field label="DEPARTAMENTO" value={inv.departamento_asignado} />
+      </div>
+
+      <Field label="CUFE" value={inv.cufe} mono />
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+        <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, border: "1px solid #e2e8f0" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.1em", marginBottom: 10 }}>DESGLOSE TRIBUTARIO</div>
+          <TaxLine label="Subtotal" amount={inv.subtotal} />
+          <TaxLine label="IVA" amount={inv.iva} percent={inv.iva_porcentaje} />
+          {inv.inc > 0 && <TaxLine label="INC" amount={inv.inc} />}
+          <div style={{ borderTop: "2px solid #0f172a", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800 }}>
+            <span>TOTAL</span>
+            <span>${(inv.total || 0).toLocaleString("es-CO")}</span>
+          </div>
+
+          {retenciones && (
+            <div style={{ marginTop: 10, padding: 10, background: "#fffbeb", borderRadius: 8, borderLeft: "3px solid #f59e0b" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#92400e", letterSpacing: "0.08em", marginBottom: 4 }}>RETENCIONES</div>
+              <TaxLine label="ReteFuente" amount={inv.retefuente} percent={inv.retefuente_porcentaje} warn />
+              <TaxLine label="ReteIVA" amount={inv.reteiva} percent={inv.reteiva_porcentaje} warn />
+              <TaxLine label="ReteICA" amount={inv.reteica} percent={inv.reteica_porcentaje} warn />
+              <div style={{ borderTop: "2px solid #f59e0b", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800, color: "#0f172a" }}>
+                <span>NETO A PAGAR</span>
+                <span>${(inv.total_a_pagar || inv.total || 0).toLocaleString("es-CO")}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ background: "#f0f9ff", borderRadius: 10, padding: 14, border: "1px solid #bae6fd" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", letterSpacing: "0.1em", marginBottom: 10 }}>DATOS DE CAUSACIÓN</div>
+          <SelectField label="Bodega" value={bodega} opts={BODEGAS} onChange={setBodega} required />
+          <div style={{ height: 10 }} />
+          <SelectField label="Cuenta contable" value={cuenta} opts={CUENTAS_CONTABLES} onChange={setCuenta} required />
+          <div style={{ height: 10 }} />
+          <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>Notas adicionales</div>
+          <textarea value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Observaciones..." rows={2} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }} />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button onClick={() => onDian(inv.cufe)} style={{
+          padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
+          background: dianOk ? "#dcfce7" : "#fff",
+          color: dianOk ? "#166534" : "#0369a1",
+          border: `1px solid ${dianOk ? "#86efac" : "#bae6fd"}`,
+        }}>
+          {dianOk ? "✓ DIAN validada" : "Validar en DIAN"}
+        </button>
+
+        <button onClick={handleCausar} disabled={!canCausar} style={{
+          padding: "10px 24px", borderRadius: 8, fontSize: 13, fontWeight: 800,
+          cursor: canCausar ? "pointer" : "not-allowed",
+          background: canCausar ? "#0f172a" : "#94a3b8",
+          color: "#fff", border: "none",
+          opacity: canCausar ? 1 : 0.5,
+        }}>
+          {saving ? "Causando..." : "Causar factura"}
+        </button>
+
+        {!canCausar && !saving && <span style={{ fontSize: 11, color: "#f59e0b" }}>Selecciona bodega y cuenta para continuar</span>}
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ session, onLogout }) {
+  const [facturas, setFacturas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState(null);
+  const [filter, setFilter] = useState("PENDIENTES");
+  const [search, setSearch] = useState("");
+  const [causadas, setCausadas] = useState(new Set());
+  const [dianValidadas, setDianValidadas] = useState(new Set());
+
+  const fetchFacturas = async () => {
+    setLoading(true);
+    try {
+      const url = `${CONFIG.FACTURAS_URL}?nit=${encodeURIComponent(session.nit)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setFacturas(Array.isArray(data) ? data : []);
+      setError("");
+    } catch (e) {
+      setError("No se pudieron cargar las facturas: " + e.message);
+      setFacturas([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchFacturas(); }, []);
+
+  const handleDian = (cufe) => {
+    if (cufe) {
+      window.open(`${CONFIG.DIAN_URL}?DocumentKey=${cufe}`, "_blank");
+      setDianValidadas((p) => new Set([...p, cufe]));
+    }
+  };
+
+  const handleCausar = async (inv, extras) => {
+    try {
+      const payload = {
+        ...inv,
+        ...extras,
+        dianValidada: dianValidadas.has(inv.cufe),
+        usuario: session.correo || session.nit,
+        empresa_nit: session.nit,
+        causado_at: new Date().toISOString(),
+      };
+      const res = await fetch(CONFIG.CAUSAR_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      setCausadas((p) => new Set([...p, inv.cufe]));
+      alert(`Factura ${inv.numero_factura} causada exitosamente`);
+      setExpanded(null);
+    } catch (e) {
+      alert("Error al causar: " + e.message);
+    }
+  };
+
+  const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
+
+  const filtered = facturas.filter((f) => {
+    const causada = causadas.has(f.cufe) || f.estado === "CAUSADA";
+    if (filter === "PENDIENTES" && (causada || !isApproved(f))) return false;
+    if (filter === "CAUSADAS" && !causada) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      if (![f.numero_factura, f.emisor, f.emisor_nit, f.cufe].some((v) => (v || "").toLowerCase().includes(s))) return false;
+    }
+    return true;
+  });
+
+  const counts = {
+    pendientes: facturas.filter((f) => isApproved(f) && !causadas.has(f.cufe) && f.estado !== "CAUSADA").length,
+    causadas: facturas.filter((f) => f.estado === "CAUSADA").length + causadas.size,
+  };
+
+  return (
+    <div style={{ minHeight: "100vh" }}>
+      <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "18px 24px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600, marginBottom: 4 }}>ASISTENTE OPUS 4.6</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>Causación de Facturas</div>
+            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>NIT {session.nit} · {session.software_contable} · {session.correo}</div>
+          </div>
+          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#10b981" }}>{counts.pendientes}</div>
+              <div style={{ fontSize: 10, color: "#64748b" }}>Pendientes</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#6366f1" }}>{counts.causadas}</div>
+              <div style={{ fontSize: 10, color: "#64748b" }}>Causadas</div>
+            </div>
+            <button onClick={onLogout} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 24px" }}>
+        {error && (
+          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#991b1b" }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          {[
+            { key: "PENDIENTES", label: `Pendientes (${counts.pendientes})` },
+            { key: "CAUSADAS", label: `Causadas (${counts.causadas})` },
+            { key: "ALL", label: `Todas (${facturas.length})` },
+          ].map((f) => (
+            <button key={f.key} onClick={() => setFilter(f.key)} style={{
+              padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+              background: filter === f.key ? "#0f172a" : "#fff",
+              color: filter === f.key ? "#fff" : "#475569",
+              border: `1px solid ${filter === f.key ? "#0f172a" : "#e2e8f0"}`,
+            }}>{f.label}</button>
+          ))}
+          <input type="text" placeholder="Buscar factura, emisor, CUFE..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 260 }} />
+          <button onClick={fetchFacturas} disabled={loading} style={{ padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", background: "#fff", color: "#475569", border: "1px solid #e2e8f0" }}>
+            {loading ? "⟳" : "Actualizar"}
+          </button>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando facturas...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14, background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+            {facturas.length === 0 ? "No hay facturas para tu empresa todavía." : "No hay facturas que coincidan con el filtro."}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {filtered.map((inv) => {
+              const isCausada = causadas.has(inv.cufe) || inv.estado === "CAUSADA";
+              const isExpanded = expanded === inv.cufe;
+              const hasRet = (inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0);
+
+              return (
+                <div key={inv.cufe || inv.numero_factura} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${isExpanded ? "#3b82f6" : "#e2e8f0"}`, overflow: "hidden", transition: "all 0.15s" }}>
+                  <div onClick={() => setExpanded(isExpanded ? null : inv.cufe)} style={{ padding: "14px 20px", cursor: "pointer", display: "flex", alignItems: "center", gap: 14 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: isCausada ? "#dcfce7" : "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
+                      {isCausada ? "✓" : "📄"}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{inv.numero_factura}</div>
+                      <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.emisor}</div>
+                    </div>
+                    <div style={{ textAlign: "right", minWidth: 110 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>${(Number(inv.total) || 0).toLocaleString("es-CO")}</div>
+                      {hasRet && <div style={{ fontSize: 10, color: "#f59e0b" }}>con retenciones</div>}
+                    </div>
+                    <div style={{ minWidth: 90 }}><Risk level={inv.risk_level} score={inv.risk_score} /></div>
+                    <div style={{ minWidth: 110 }}><Badge status={isCausada ? "CAUSADA" : inv.estado} /></div>
+                    <div style={{ fontSize: 16, color: "#94a3b8", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</div>
+                  </div>
+                  {isExpanded && !isCausada && (
+                    <InvoiceDetail inv={inv} onCausar={handleCausar} onDian={handleDian} dianOk={dianValidadas.has(inv.cufe)} />
+                  )}
+                  {isExpanded && isCausada && (
+                    <div style={{ background: "#f0fdf4", padding: 20, borderTop: "1px solid #dcfce7", textAlign: "center", color: "#166534", fontSize: 13 }}>
+                      ✓ Esta factura ya fue causada
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [session, setSession] = useState(null);
+  if (!session) return <LoginScreen onLogin={setSession} />;
+  return <Dashboard session={session} onLogout={() => setSession(null)} />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
