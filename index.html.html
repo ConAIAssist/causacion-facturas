@@ -28,54 +28,193 @@ const CONFIG = {
   DIAN_URL:     "https://catalogo-vpfe.dian.gov.co/User/SearchDocument",
 };
 
-const BODEGAS = ["Bodega Principal", "Bodega Secundaria", "Bodega Zona Norte", "Bodega Zona Sur", "Almacén Central"];
-const CUENTAS_CONTABLES = [
-  "2205 - Proveedores nacionales",
-  "2335 - Costos y gastos por pagar",
-  "2365 - Retención en la fuente",
-  "2367 - IVA retenido",
-  "5110 - Honorarios",
-  "5115 - Impuestos",
-  "5120 - Arrendamientos",
-  "5135 - Servicios",
-  "5195 - Diversos",
-  "6105 - Compra de mercancías",
-  "7105 - Costos de producción",
-];
+// ═══════════════════════════════════════════════════════════════
+// PARÁMETROS POR SOFTWARE CONTABLE
+// Cada software tiene su propio PUC (Plan Único de Cuentas) y bodegas
+// ═══════════════════════════════════════════════════════════════
+const SOFTWARE_PARAMS = {
+  Siigo: {
+    bodegas: ["Bodega Principal", "Bodega Secundaria", "Almacén Central", "Mercancía en Tránsito"],
+    cuentas: [
+      "2205 - Proveedores nacionales",
+      "2335 - Costos y gastos por pagar",
+      "2365 - Retención en la fuente",
+      "2367 - IVA retenido",
+      "2368 - ICA retenido",
+      "5105 - Gastos de personal",
+      "5110 - Honorarios",
+      "5115 - Impuestos",
+      "5120 - Arrendamientos",
+      "5135 - Servicios",
+      "5195 - Diversos",
+      "6105 - Compra de mercancías",
+      "7105 - Materias primas",
+    ],
+  },
+  Alegra: {
+    bodegas: ["Bodega Principal", "Bodega Secundaria"],
+    cuentas: [
+      "2205 - Proveedores nacionales",
+      "2335 - Costos y gastos por pagar",
+      "2365 - Retención en la fuente",
+      "2367 - IVA retenido",
+      "5110 - Honorarios y servicios",
+      "5115 - Impuestos",
+      "5120 - Arrendamientos",
+      "5135 - Servicios técnicos",
+      "5140 - Gastos legales",
+      "5195 - Gastos diversos",
+      "6105 - Costo de ventas",
+    ],
+  },
+  Loggro: {
+    bodegas: ["Bodega General", "Bodega Principal", "Bodega Secundaria", "Bodega Traslado"],
+    cuentas: [
+      "22050501 - Proveedores nacionales",
+      "23350501 - Costos y gastos por pagar",
+      "23650501 - ReteFuente servicios",
+      "23670501 - ReteIVA",
+      "51100501 - Honorarios",
+      "51150501 - Impuestos",
+      "51200501 - Arrendamientos",
+      "51350501 - Servicios públicos",
+      "61050501 - Compras",
+    ],
+  },
+  Mantis: {
+    bodegas: ["Bodega 01 - Principal", "Bodega 02 - Secundaria", "Bodega 03 - Almacén"],
+    cuentas: [
+      "220505 - Proveedores",
+      "233505 - Costos y gastos por pagar",
+      "236505 - Retención fuente",
+      "236701 - IVA retenido",
+      "511005 - Honorarios",
+      "511505 - Impuestos",
+      "512005 - Arrendamientos",
+      "513505 - Servicios",
+      "610510 - Compra mercancía",
+    ],
+  },
+  Cuenti: {
+    bodegas: ["Bodega Principal", "Bodega Secundaria", "Centro de Distribución"],
+    cuentas: [
+      "2205 - Proveedores nacionales",
+      "2335 - Costos por pagar",
+      "2365 - ReteFuente",
+      "2367 - ReteIVA",
+      "5105 - Gastos de personal",
+      "5110 - Honorarios",
+      "5115 - Impuestos",
+      "5120 - Arrendamientos",
+      "5135 - Servicios",
+      "5195 - Gastos diversos",
+      "6105 - Compra mercancía",
+    ],
+  },
+  "World Office": {
+    bodegas: ["Bodega 001", "Bodega 002", "Bodega 003"],
+    cuentas: [
+      "22050501 - Proveedores nacionales",
+      "23350501 - Costos y gastos por pagar",
+      "23652001 - ReteFuente servicios",
+      "23670501 - ReteIVA",
+      "51100501 - Honorarios",
+      "51150501 - Impuestos y tasas",
+      "51200501 - Arrendamientos",
+      "51350501 - Servicios públicos",
+      "51959501 - Gastos diversos",
+      "61050501 - Compras mercancía",
+    ],
+  },
+  Odoo: {
+    bodegas: ["WH/Stock", "WH/Input", "WH/Output", "WH/Virtual"],
+    cuentas: [
+      "220505 - Accounts Payable",
+      "233505 - Accrued Expenses",
+      "236505 - Withholding Tax",
+      "236705 - VAT Withholding",
+      "511005 - Professional Fees",
+      "511505 - Taxes",
+      "512005 - Rent Expense",
+      "513505 - Utilities",
+      "610505 - Purchase of Goods",
+    ],
+  },
+};
 
+// Fallback para software no reconocido
+const DEFAULT_PARAMS = {
+  bodegas: ["Bodega Principal", "Bodega Secundaria"],
+  cuentas: [
+    "2205 - Proveedores nacionales",
+    "2335 - Costos y gastos por pagar",
+    "2365 - Retención en la fuente",
+    "5110 - Honorarios",
+    "5115 - Impuestos",
+    "5120 - Arrendamientos",
+    "5135 - Servicios",
+    "5195 - Diversos",
+    "6105 - Compra de mercancías",
+  ],
+};
+
+// ═══════════════════════════════════════════════════════════════
+// PANTALLA DE LOGIN
+// ═══════════════════════════════════════════════════════════════
 function LoginScreen({ onLogin }) {
   const [nit, setNit] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [debug, setDebug] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    setDebug("");
     const nitLimpio = nit.replace(/\D/g, "");
     if (!nitLimpio || nitLimpio.length < 6) {
-      setError("Ingresa un NIT válido");
+      setError("Ingresa un NIT válido (mínimo 6 dígitos)");
       return;
     }
 
     setLoading(true);
     try {
+      console.log("[LOGIN] Enviando NIT:", nitLimpio);
       const res = await fetch(CONFIG.LOGIN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nit: nitLimpio }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+
+      console.log("[LOGIN] Status:", res.status);
+      const text = await res.text();
+      console.log("[LOGIN] Respuesta raw:", text);
+
+      if (!res.ok) {
+        throw new Error(`El servidor respondió con código ${res.status}. Verifica que el workflow esté activo en n8n.`);
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("El servidor no devolvió JSON válido. Respuesta: " + text.slice(0, 100));
+      }
+
+      console.log("[LOGIN] Data parsed:", data);
 
       if (!data.valid) {
-        setError(data.error || "Empresa no registrada. Verifica el NIT.");
+        setError(data.error || "Empresa no registrada. Verifica que el NIT esté en tu hoja de onboarding.");
+        setDebug("NIT buscado: " + nitLimpio);
         setLoading(false);
         return;
       }
 
-      onLogin(data);
+      onLogin({ ...data, nit: nitLimpio });
     } catch (err) {
-      setError("Error de conexión: " + err.message);
+      console.error("[LOGIN] Error:", err);
+      setError(err.message);
+      setDebug("Revisa la consola del navegador (F12) para más detalles.");
       setLoading(false);
     }
   };
@@ -101,11 +240,18 @@ function LoginScreen({ onLogin }) {
               disabled={loading}
               style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }}
             />
+            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Ingresa solo los números, sin dígito de verificación</div>
           </div>
 
           {error && (
-            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 16 }}>
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
               {error}
+            </div>
+          )}
+
+          {debug && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#64748b", marginBottom: 12, fontFamily: "monospace" }}>
+              {debug}
             </div>
           )}
 
@@ -130,6 +276,9 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// COMPONENTES COMPARTIDOS
+// ═══════════════════════════════════════════════════════════════
 function Badge({ status }) {
   const S = {
     APROBADA: { bg: "#dcfce7", color: "#166534", label: "Aprobada" },
@@ -181,12 +330,13 @@ function TaxLine({ label, amount, percent, warn }) {
   );
 }
 
-function InvoiceDetail({ inv, onCausar, onDian, dianOk }) {
+function InvoiceDetail({ inv, onCausar, onDian, dianOk, software }) {
   const [bodega, setBodega] = useState("");
   const [cuenta, setCuenta] = useState("");
   const [notas, setNotas] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const params = SOFTWARE_PARAMS[software] || DEFAULT_PARAMS;
   const retenciones = inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0;
   const canCausar = bodega && cuenta && !saving;
 
@@ -238,10 +388,13 @@ function InvoiceDetail({ inv, onCausar, onDian, dianOk }) {
         </div>
 
         <div style={{ background: "#f0f9ff", borderRadius: 10, padding: 14, border: "1px solid #bae6fd" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", letterSpacing: "0.1em", marginBottom: 10 }}>DATOS DE CAUSACIÓN</div>
-          <SelectField label="Bodega" value={bodega} opts={BODEGAS} onChange={setBodega} required />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", letterSpacing: "0.1em" }}>DATOS DE CAUSACIÓN</div>
+            <div style={{ fontSize: 9, background: "#0369a1", color: "#fff", padding: "2px 8px", borderRadius: 10, fontWeight: 700 }}>{software || "Default"}</div>
+          </div>
+          <SelectField label="Bodega" value={bodega} opts={params.bodegas} onChange={setBodega} required />
           <div style={{ height: 10 }} />
-          <SelectField label="Cuenta contable" value={cuenta} opts={CUENTAS_CONTABLES} onChange={setCuenta} required />
+          <SelectField label="Cuenta contable" value={cuenta} opts={params.cuentas} onChange={setCuenta} required />
           <div style={{ height: 10 }} />
           <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>Notas adicionales</div>
           <textarea value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Observaciones..." rows={2} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }} />
@@ -274,6 +427,9 @@ function InvoiceDetail({ inv, onCausar, onDian, dianOk }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════════════════
 function Dashboard({ session, onLogout }) {
   const [facturas, setFacturas] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -286,14 +442,28 @@ function Dashboard({ session, onLogout }) {
 
   const fetchFacturas = async () => {
     setLoading(true);
+    setError("");
     try {
       const url = `${CONFIG.FACTURAS_URL}?nit=${encodeURIComponent(session.nit)}`;
+      console.log("[FACTURAS] GET:", url);
       const res = await fetch(url);
+      console.log("[FACTURAS] Status:", res.status);
+
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setFacturas(Array.isArray(data) ? data : []);
-      setError("");
+
+      const text = await res.text();
+      console.log("[FACTURAS] Respuesta:", text.slice(0, 200));
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("El servidor no devolvió JSON válido");
+      }
+
+      setFacturas(Array.isArray(data) ? data : (data ? [data] : []));
     } catch (e) {
+      console.error("[FACTURAS] Error:", e);
       setError("No se pudieron cargar las facturas: " + e.message);
       setFacturas([]);
     } finally {
@@ -318,8 +488,10 @@ function Dashboard({ session, onLogout }) {
         dianValidada: dianValidadas.has(inv.cufe),
         usuario: session.correo || session.nit,
         empresa_nit: session.nit,
+        software_contable: session.software_contable,
         causado_at: new Date().toISOString(),
       };
+      console.log("[CAUSAR] Payload:", payload);
       const res = await fetch(CONFIG.CAUSAR_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -328,7 +500,7 @@ function Dashboard({ session, onLogout }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       setCausadas((p) => new Set([...p, inv.cufe]));
-      alert(`Factura ${inv.numero_factura} causada exitosamente`);
+      alert(`✓ Factura ${inv.numero_factura} causada en ${session.software_contable}`);
       setExpanded(null);
     } catch (e) {
       alert("Error al causar: " + e.message);
@@ -436,7 +608,7 @@ function Dashboard({ session, onLogout }) {
                     <div style={{ fontSize: 16, color: "#94a3b8", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</div>
                   </div>
                   {isExpanded && !isCausada && (
-                    <InvoiceDetail inv={inv} onCausar={handleCausar} onDian={handleDian} dianOk={dianValidadas.has(inv.cufe)} />
+                    <InvoiceDetail inv={inv} onCausar={handleCausar} onDian={handleDian} dianOk={dianValidadas.has(inv.cufe)} software={session.software_contable} />
                   )}
                   {isExpanded && isCausada && (
                     <div style={{ background: "#f0fdf4", padding: 20, borderTop: "1px solid #dcfce7", textAlign: "center", color: "#166534", fontSize: 13 }}>
