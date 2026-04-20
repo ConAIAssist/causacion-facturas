@@ -29,6 +29,7 @@ const CONFIG = {
   CAUSAR_URL:   "https://conaiassist.app.n8n.cloud/webhook/causar-factura",
   ERP_PARAMS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/erp-params",
   DIAN_VALIDATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/dian-validate",
+  SAVE_CREDENTIALS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/save-credentials",
 };
 
 // Solo se guarda la URL sugerida del API por software, nada más
@@ -66,7 +67,10 @@ function LoginScreen({ onLogin }) {
         body: JSON.stringify({ nit: nitLimpio }),
       });
       if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
-      const data = await res.json();
+      // Safe parse: si el webhook responde body vacío (ej: NIT inexistente sin alwaysOutputData),
+      // lo tratamos como "empresa no encontrada" en vez de reventar con SyntaxError.
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : { valid: false, error: "Empresa no registrada. Verifica el NIT." };
       if (!data.valid) {
         setError(data.error || "Empresa no registrada. Verifica el NIT.");
         setLoading(false);
@@ -489,7 +493,11 @@ function Dashboard({ session, onLogout }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const [credentials, setCredentials] = useState(null);
+  // Credenciales: inicializar desde session si el login las trajo guardadas,
+  // si no null (usuario tendrá que conectar manualmente)
+  const [credentials, setCredentials] = useState(
+    session.credentials && session.credentials.erpKey ? session.credentials : null
+  );
   const [erpParams, setErpParams] = useState(null);
   const [erpLoading, setErpLoading] = useState(false);
 
@@ -770,7 +778,36 @@ function Dashboard({ session, onLogout }) {
           session={session}
           credentials={credentials}
           onClose={() => setShowSettings(false)}
-          onSave={(creds) => { setCredentials(creds); setShowSettings(false); alert("✓ Credenciales guardadas. Cargando parámetros del ERP..."); }}
+          onSave={async (creds) => {
+            // Guardar credenciales en el backend (encriptadas) + en estado local.
+            // Si el backend falla, no perdemos la sesión: solo alertamos.
+            try {
+              const res = await fetch(CONFIG.SAVE_CREDENTIALS_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  nit: session.nit,
+                  dianUrl: creds.dianUrl,
+                  erpUrl: creds.erpUrl,
+                  erpUser: creds.erpUser,
+                  erpKey: creds.erpKey,
+                }),
+              });
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              const text = await res.text();
+              const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+              if (!data.success) throw new Error(data.error || "Error al guardar");
+
+              setCredentials(creds);
+              setShowSettings(false);
+              alert("✓ Credenciales guardadas. Cargando parámetros del ERP...");
+            } catch (e) {
+              // Mantiene credenciales en local aunque el backend falle, para no bloquear la sesión.
+              setCredentials(creds);
+              setShowSettings(false);
+              alert("⚠ Credenciales aplicadas localmente, pero no se pudieron guardar en el servidor: " + e.message + "\nTendrás que volver a ingresarlas la próxima vez.");
+            }
+          }}
         />
       )}
     </div>
@@ -785,5 +822,7 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
+</body>
+</html>
 </body>
 </html>
