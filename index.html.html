@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Causación de Facturas · Asistente ConAiAssist 4.6</title>
+<title>Causación de Facturas · Asistente Opus 4.6</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,13 +13,15 @@
   button:focus, select:focus, input:focus, textarea:focus { outline: 2px solid #3b82f6; outline-offset: 1px; }
   .spin { animation: spin 1s linear infinite; display: inline-block; }
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .fade-in { animation: fadeIn 0.3s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 </head>
 <body>
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect } = React;
+const { useState, useEffect, useMemo } = React;
 
 const CONFIG = {
   LOGIN_URL:    "https://conaiassist.app.n8n.cloud/webhook/api/login",
@@ -28,193 +30,83 @@ const CONFIG = {
   DIAN_URL:     "https://catalogo-vpfe.dian.gov.co/User/SearchDocument",
 };
 
-// ═══════════════════════════════════════════════════════════════
-// PARÁMETROS POR SOFTWARE CONTABLE
-// Cada software tiene su propio PUC (Plan Único de Cuentas) y bodegas
-// ═══════════════════════════════════════════════════════════════
 const SOFTWARE_PARAMS = {
   Siigo: {
     bodegas: ["Bodega Principal", "Bodega Secundaria", "Almacén Central", "Mercancía en Tránsito"],
-    cuentas: [
-      "2205 - Proveedores nacionales",
-      "2335 - Costos y gastos por pagar",
-      "2365 - Retención en la fuente",
-      "2367 - IVA retenido",
-      "2368 - ICA retenido",
-      "5105 - Gastos de personal",
-      "5110 - Honorarios",
-      "5115 - Impuestos",
-      "5120 - Arrendamientos",
-      "5135 - Servicios",
-      "5195 - Diversos",
-      "6105 - Compra de mercancías",
-      "7105 - Materias primas",
-    ],
+    cuentas: ["2205 - Proveedores nacionales","2335 - Costos y gastos por pagar","2365 - Retención en la fuente","2367 - IVA retenido","2368 - ICA retenido","5105 - Gastos de personal","5110 - Honorarios","5115 - Impuestos","5120 - Arrendamientos","5135 - Servicios","5195 - Diversos","6105 - Compra de mercancías","7105 - Materias primas"],
+    apiUrl: "https://api.siigo.com",
   },
   Alegra: {
     bodegas: ["Bodega Principal", "Bodega Secundaria"],
-    cuentas: [
-      "2205 - Proveedores nacionales",
-      "2335 - Costos y gastos por pagar",
-      "2365 - Retención en la fuente",
-      "2367 - IVA retenido",
-      "5110 - Honorarios y servicios",
-      "5115 - Impuestos",
-      "5120 - Arrendamientos",
-      "5135 - Servicios técnicos",
-      "5140 - Gastos legales",
-      "5195 - Gastos diversos",
-      "6105 - Costo de ventas",
-    ],
+    cuentas: ["2205 - Proveedores nacionales","2335 - Costos y gastos por pagar","2365 - Retención en la fuente","2367 - IVA retenido","5110 - Honorarios y servicios","5115 - Impuestos","5120 - Arrendamientos","5135 - Servicios técnicos","5140 - Gastos legales","5195 - Gastos diversos","6105 - Costo de ventas"],
+    apiUrl: "https://api.alegra.com",
   },
   Loggro: {
-    bodegas: ["Bodega General", "Bodega Principal", "Bodega Secundaria", "Bodega Traslado"],
-    cuentas: [
-      "22050501 - Proveedores nacionales",
-      "23350501 - Costos y gastos por pagar",
-      "23650501 - ReteFuente servicios",
-      "23670501 - ReteIVA",
-      "51100501 - Honorarios",
-      "51150501 - Impuestos",
-      "51200501 - Arrendamientos",
-      "51350501 - Servicios públicos",
-      "61050501 - Compras",
-    ],
+    bodegas: ["Bodega General","Bodega Principal","Bodega Secundaria","Bodega Traslado"],
+    cuentas: ["22050501 - Proveedores nacionales","23350501 - Costos y gastos por pagar","23650501 - ReteFuente servicios","23670501 - ReteIVA","51100501 - Honorarios","51150501 - Impuestos","51200501 - Arrendamientos","51350501 - Servicios públicos","61050501 - Compras"],
+    apiUrl: "https://api.loggro.com",
   },
   Mantis: {
-    bodegas: ["Bodega 01 - Principal", "Bodega 02 - Secundaria", "Bodega 03 - Almacén"],
-    cuentas: [
-      "220505 - Proveedores",
-      "233505 - Costos y gastos por pagar",
-      "236505 - Retención fuente",
-      "236701 - IVA retenido",
-      "511005 - Honorarios",
-      "511505 - Impuestos",
-      "512005 - Arrendamientos",
-      "513505 - Servicios",
-      "610510 - Compra mercancía",
-    ],
+    bodegas: ["Bodega 01 - Principal","Bodega 02 - Secundaria","Bodega 03 - Almacén"],
+    cuentas: ["220505 - Proveedores","233505 - Costos y gastos por pagar","236505 - Retención fuente","236701 - IVA retenido","511005 - Honorarios","511505 - Impuestos","512005 - Arrendamientos","513505 - Servicios","610510 - Compra mercancía"],
+    apiUrl: "https://api.mantis.com.co",
   },
   Cuenti: {
-    bodegas: ["Bodega Principal", "Bodega Secundaria", "Centro de Distribución"],
-    cuentas: [
-      "2205 - Proveedores nacionales",
-      "2335 - Costos por pagar",
-      "2365 - ReteFuente",
-      "2367 - ReteIVA",
-      "5105 - Gastos de personal",
-      "5110 - Honorarios",
-      "5115 - Impuestos",
-      "5120 - Arrendamientos",
-      "5135 - Servicios",
-      "5195 - Gastos diversos",
-      "6105 - Compra mercancía",
-    ],
+    bodegas: ["Bodega Principal","Bodega Secundaria","Centro de Distribución"],
+    cuentas: ["2205 - Proveedores nacionales","2335 - Costos por pagar","2365 - ReteFuente","2367 - ReteIVA","5105 - Gastos de personal","5110 - Honorarios","5115 - Impuestos","5120 - Arrendamientos","5135 - Servicios","5195 - Gastos diversos","6105 - Compra mercancía"],
+    apiUrl: "https://api.cuenti.com",
   },
   "World Office": {
-    bodegas: ["Bodega 001", "Bodega 002", "Bodega 003"],
-    cuentas: [
-      "22050501 - Proveedores nacionales",
-      "23350501 - Costos y gastos por pagar",
-      "23652001 - ReteFuente servicios",
-      "23670501 - ReteIVA",
-      "51100501 - Honorarios",
-      "51150501 - Impuestos y tasas",
-      "51200501 - Arrendamientos",
-      "51350501 - Servicios públicos",
-      "51959501 - Gastos diversos",
-      "61050501 - Compras mercancía",
-    ],
+    bodegas: ["Bodega 001","Bodega 002","Bodega 003"],
+    cuentas: ["22050501 - Proveedores nacionales","23350501 - Costos y gastos por pagar","23652001 - ReteFuente servicios","23670501 - ReteIVA","51100501 - Honorarios","51150501 - Impuestos y tasas","51200501 - Arrendamientos","51350501 - Servicios públicos","51959501 - Gastos diversos","61050501 - Compras mercancía"],
+    apiUrl: "https://api.worldoffice.cloud",
   },
   Odoo: {
-    bodegas: ["WH/Stock", "WH/Input", "WH/Output", "WH/Virtual"],
-    cuentas: [
-      "220505 - Accounts Payable",
-      "233505 - Accrued Expenses",
-      "236505 - Withholding Tax",
-      "236705 - VAT Withholding",
-      "511005 - Professional Fees",
-      "511505 - Taxes",
-      "512005 - Rent Expense",
-      "513505 - Utilities",
-      "610505 - Purchase of Goods",
-    ],
+    bodegas: ["WH/Stock","WH/Input","WH/Output","WH/Virtual"],
+    cuentas: ["220505 - Accounts Payable","233505 - Accrued Expenses","236505 - Withholding Tax","236705 - VAT Withholding","511005 - Professional Fees","511505 - Taxes","512005 - Rent Expense","513505 - Utilities","610505 - Purchase of Goods"],
+    apiUrl: "https://tuinstancia.odoo.com",
   },
 };
 
-// Fallback para software no reconocido
 const DEFAULT_PARAMS = {
-  bodegas: ["Bodega Principal", "Bodega Secundaria"],
-  cuentas: [
-    "2205 - Proveedores nacionales",
-    "2335 - Costos y gastos por pagar",
-    "2365 - Retención en la fuente",
-    "5110 - Honorarios",
-    "5115 - Impuestos",
-    "5120 - Arrendamientos",
-    "5135 - Servicios",
-    "5195 - Diversos",
-    "6105 - Compra de mercancías",
-  ],
+  bodegas: ["Bodega Principal","Bodega Secundaria"],
+  cuentas: ["2205 - Proveedores nacionales","2335 - Costos y gastos por pagar","2365 - Retención en la fuente","5110 - Honorarios","5115 - Impuestos","5120 - Arrendamientos","5135 - Servicios","5195 - Diversos","6105 - Compra de mercancías"],
+  apiUrl: "",
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PANTALLA DE LOGIN
+// LOGIN
 // ═══════════════════════════════════════════════════════════════
 function LoginScreen({ onLogin }) {
   const [nit, setNit] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [debug, setDebug] = useState("");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    setDebug("");
     const nitLimpio = nit.replace(/\D/g, "");
     if (!nitLimpio || nitLimpio.length < 6) {
       setError("Ingresa un NIT válido (mínimo 6 dígitos)");
       return;
     }
-
     setLoading(true);
     try {
-      console.log("[LOGIN] Enviando NIT:", nitLimpio);
       const res = await fetch(CONFIG.LOGIN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nit: nitLimpio }),
       });
-
-      console.log("[LOGIN] Status:", res.status);
-      const text = await res.text();
-      console.log("[LOGIN] Respuesta raw:", text);
-
-      if (!res.ok) {
-        throw new Error(`El servidor respondió con código ${res.status}. Verifica que el workflow esté activo en n8n.`);
-      }
-
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error("El servidor no devolvió JSON válido. Respuesta: " + text.slice(0, 100));
-      }
-
-      console.log("[LOGIN] Data parsed:", data);
-
+      if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
+      const data = await res.json();
       if (!data.valid) {
-        setError(data.error || "Empresa no registrada. Verifica que el NIT esté en tu hoja de onboarding.");
-        setDebug("NIT buscado: " + nitLimpio);
+        setError(data.error || "Empresa no registrada. Verifica el NIT.");
         setLoading(false);
         return;
       }
-
       onLogin({ ...data, nit: nitLimpio });
     } catch (err) {
-      console.error("[LOGIN] Error:", err);
       setError(err.message);
-      setDebug("Revisa la consola del navegador (F12) para más detalles.");
       setLoading(false);
     }
   };
@@ -224,52 +116,93 @@ function LoginScreen({ onLogin }) {
       <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, padding: 32, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600, marginBottom: 6 }}>ASISTENTE OPUS 4.6</div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "#0f172a" }}>Causación de Facturas</div>
+          <div style={{ fontSize: 24, fontWeight: 800 }}>Causación de Facturas</div>
           <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Inicia sesión con el NIT de tu empresa</div>
         </div>
-
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
-            <input
-              type="text"
-              value={nit}
-              onChange={(e) => setNit(e.target.value)}
-              placeholder="Ej: 800456789"
-              autoFocus
-              disabled={loading}
-              style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }}
-            />
-            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Ingresa solo los números, sin dígito de verificación</div>
+            <input type="text" value={nit} onChange={(e) => setNit(e.target.value)} placeholder="Ej: 800456789" autoFocus disabled={loading}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }} />
+            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Solo números, sin dígito de verificación</div>
           </div>
-
-          {error && (
-            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
-              {error}
-            </div>
-          )}
-
-          {debug && (
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 10, color: "#64748b", marginBottom: 12, fontFamily: "monospace" }}>
-              {debug}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading || !nit}
-            style={{
-              width: "100%", padding: "12px", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit ? "not-allowed" : "pointer",
-              background: loading || !nit ? "#94a3b8" : "#0f172a", color: "#fff",
-              opacity: loading || !nit ? 0.6 : 1,
-            }}
-          >
+          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+          <button type="submit" disabled={loading || !nit} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit ? "not-allowed" : "pointer", background: loading || !nit ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !nit ? 0.6 : 1 }}>
             {loading ? <span><span className="spin">⟳</span> Verificando...</span> : "Ingresar"}
           </button>
         </form>
+      </div>
+    </div>
+  );
+}
 
-        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #e2e8f0", fontSize: 11, color: "#94a3b8", textAlign: "center" }}>
-          ¿Tu empresa aún no está registrada? Completa el formulario de onboarding.
+// ═══════════════════════════════════════════════════════════════
+// MODAL DE CONFIGURACIÓN DE APIs
+// ═══════════════════════════════════════════════════════════════
+function ApiSettingsModal({ session, credentials, onSave, onClose }) {
+  const [dianUser, setDianUser] = useState(credentials?.dianUser || "");
+  const [dianPass, setDianPass] = useState(credentials?.dianPass || "");
+  const [erpKey, setErpKey] = useState(credentials?.erpKey || "");
+  const [erpUser, setErpUser] = useState(credentials?.erpUser || "");
+  const [erpUrl, setErpUrl] = useState(credentials?.erpUrl || SOFTWARE_PARAMS[session.software_contable]?.apiUrl || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave({ dianUser, dianPass, erpKey, erpUser, erpUrl });
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 560, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>CONFIGURACIÓN DE CREDENCIALES</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>Conectar APIs externas</div>
+          </div>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
+        </div>
+
+        <div style={{ background: "#f8fafc", borderRadius: 10, padding: 16, marginBottom: 16, border: "1px solid #e2e8f0" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 10, letterSpacing: "0.1em" }}>🏛 PORTAL DIAN</div>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>Credenciales de tu cuenta en la DIAN para consultas automáticas.</div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>USUARIO DIAN (NIT o correo)</label>
+            <input type="text" value={dianUser} onChange={(e) => setDianUser(e.target.value)} placeholder="Ej: 800456789" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>CONTRASEÑA O API KEY</label>
+            <input type="password" value={dianPass} onChange={(e) => setDianPass(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
+          </div>
+        </div>
+
+        <div style={{ background: "#f0f9ff", borderRadius: 10, padding: 16, marginBottom: 20, border: "1px solid #bae6fd" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 10, letterSpacing: "0.1em" }}>⚙ API DE {session.software_contable?.toUpperCase()}</div>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>API Key y datos para enviar las facturas causadas directamente a tu software contable.</div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>URL DEL API</label>
+            <input type="text" value={erpUrl} onChange={(e) => setErpUrl(e.target.value)} placeholder="https://api.siigo.com" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>USUARIO / EMAIL</label>
+            <input type="text" value={erpUser} onChange={(e) => setErpUser(e.target.value)} placeholder="tu@empresa.com" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>API KEY / TOKEN</label>
+            <input type="password" value={erpKey} onChange={(e) => setErpKey(e.target.value)} placeholder="••••••••••••••••" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
+          </div>
+        </div>
+
+        <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: "#92400e" }}>
+          🔒 Las credenciales se guardan encriptadas en n8n y nunca salen de tu cuenta.
+        </div>
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
+          <button onClick={handleSave} disabled={saving} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Guardando..." : "Guardar credenciales"}
+          </button>
         </div>
       </div>
     </div>
@@ -277,13 +210,26 @@ function LoginScreen({ onLogin }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// COMPONENTES COMPARTIDOS
+// UTILIDADES
+// ═══════════════════════════════════════════════════════════════
+function fmt(n) { return "$" + (Number(n) || 0).toLocaleString("es-CO"); }
+function dateFromInv(inv) {
+  const d = inv.fecha_aprobacion || inv.processed_at || inv.causado_at;
+  return d ? new Date(d) : null;
+}
+function dateStr(d) {
+  if (!d) return "—";
+  const dt = new Date(d);
+  return dt.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COMPONENTES
 // ═══════════════════════════════════════════════════════════════
 function Badge({ status }) {
   const S = {
     APROBADA: { bg: "#dcfce7", color: "#166534", label: "Aprobada" },
     APROBADA_AUTOMATICAMENTE: { bg: "#dbeafe", color: "#1e40af", label: "Auto-aprobada" },
-    RECHAZADA: { bg: "#fef2f2", color: "#991b1b", label: "Rechazada" },
     CAUSADA: { bg: "#f0fdf4", color: "#14532d", label: "✓ Causada" },
   };
   const s = S[status] || { bg: "#fef3c7", color: "#92400e", label: status };
@@ -299,9 +245,7 @@ function Field({ label, value, mono }) {
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 3 }}>{label}</div>
-      <div style={{ fontSize: 13, color: "#0f172a", fontFamily: mono ? "'Courier New', monospace" : "inherit", wordBreak: mono ? "break-all" : "normal", lineHeight: 1.4 }}>
-        {value || "—"}
-      </div>
+      <div style={{ fontSize: 13, color: "#0f172a", fontFamily: mono ? "'Courier New', monospace" : "inherit", wordBreak: mono ? "break-all" : "normal", lineHeight: 1.4 }}>{value || "—"}</div>
     </div>
   );
 }
@@ -309,10 +253,8 @@ function Field({ label, value, mono }) {
 function SelectField({ label, value, opts, onChange, required }) {
   return (
     <div>
-      <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>
-        {label} {required && <span style={{ color: "#ef4444" }}>*</span>}
-      </div>
-      <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, background: "#fff", color: "#0f172a", cursor: "pointer", boxSizing: "border-box" }}>
+      <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>{label} {required && <span style={{ color: "#ef4444" }}>*</span>}</div>
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, background: "#fff", cursor: "pointer", boxSizing: "border-box" }}>
         <option value="">Seleccionar...</option>
         {opts.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
@@ -325,63 +267,96 @@ function TaxLine({ label, amount, percent, warn }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, color: warn ? "#92400e" : "#475569" }}>
       <span>{label}{percent > 0 ? ` (${percent}%)` : ""}</span>
-      <span style={{ fontWeight: 600 }}>{warn ? "-" : ""}${amount.toLocaleString("es-CO")}</span>
+      <span style={{ fontWeight: 600 }}>{warn ? "-" : ""}{fmt(amount)}</span>
     </div>
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PANEL DE ANÁLISIS IA (resumen de lo que hizo la IA)
+// ═══════════════════════════════════════════════════════════════
+function AiInsights({ inv }) {
+  return (
+    <div style={{ background: "linear-gradient(135deg, #f5f3ff, #eef2ff)", borderRadius: 10, padding: 14, border: "1px solid #ddd6fe", marginBottom: 16 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#6d28d9", letterSpacing: "0.1em", marginBottom: 10 }}>🧠 ANÁLISIS AUTOMÁTICO</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 12 }}>
+        <div>
+          <div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>CATEGORÍA IA</div>
+          <div style={{ fontWeight: 600 }}>{inv.categoria || "—"}</div>
+          {inv.subcategoria && <div style={{ fontSize: 11, color: "#6d28d9" }}>{inv.subcategoria}</div>}
+        </div>
+        <div>
+          <div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>TIPO CONTABLE</div>
+          <div style={{ fontWeight: 600 }}>{inv.tipo_contable || "—"}</div>
+        </div>
+        <div>
+          <div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>DEPARTAMENTO SUGERIDO</div>
+          <div style={{ fontWeight: 600 }}>{inv.departamento_asignado || "—"}</div>
+        </div>
+        <div>
+          <div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>NIVEL DE RIESGO</div>
+          <div><Risk level={inv.risk_level} score={inv.risk_score} /></div>
+        </div>
+      </div>
+      {inv.tipo_contable_razon && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #ddd6fe", fontSize: 11, color: "#475569", fontStyle: "italic" }}>
+          💡 {inv.tipo_contable_razon}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DETALLE DE FACTURA
+// ═══════════════════════════════════════════════════════════════
 function InvoiceDetail({ inv, onCausar, onDian, dianOk, software }) {
   const [bodega, setBodega] = useState("");
   const [cuenta, setCuenta] = useState("");
   const [notas, setNotas] = useState("");
   const [saving, setSaving] = useState(false);
-
   const params = SOFTWARE_PARAMS[software] || DEFAULT_PARAMS;
   const retenciones = inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0;
   const canCausar = bodega && cuenta && !saving;
 
   const handleCausar = async () => {
     setSaving(true);
-    try {
-      await onCausar(inv, { bodega, cuenta, notas });
-    } finally {
-      setSaving(false);
-    }
+    try { await onCausar(inv, { bodega, cuenta, notas }); }
+    finally { setSaving(false); }
   };
 
   return (
-    <div style={{ background: "#fff", padding: 20, borderTop: "1px solid #e2e8f0" }}>
+    <div className="fade-in" style={{ background: "#fff", padding: 20, borderTop: "1px solid #e2e8f0" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
         <Field label="RECEPTOR" value={inv.receptor} />
         <Field label="NIT RECEPTOR" value={inv.receptor_nit} />
         <Field label="MEDIO DE PAGO" value={inv.medio_pago || "No especificado"} />
-        <Field label="CATEGORÍA AI" value={`${inv.categoria || ""} / ${inv.subcategoria || "—"}`} />
-        <Field label="TIPO CONTABLE" value={inv.tipo_contable} />
-        <Field label="DEPARTAMENTO" value={inv.departamento_asignado} />
+        <Field label="FECHA APROBACIÓN" value={dateStr(inv.fecha_aprobacion)} />
+        <Field label="MONEDA" value={inv.moneda || "COP"} />
+        <Field label="SOFTWARE" value={software || "—"} />
       </div>
 
       <Field label="CUFE" value={inv.cufe} mono />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 16 }}>
+      <AiInsights inv={inv} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, border: "1px solid #e2e8f0" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.1em", marginBottom: 10 }}>DESGLOSE TRIBUTARIO</div>
           <TaxLine label="Subtotal" amount={inv.subtotal} />
           <TaxLine label="IVA" amount={inv.iva} percent={inv.iva_porcentaje} />
           {inv.inc > 0 && <TaxLine label="INC" amount={inv.inc} />}
           <div style={{ borderTop: "2px solid #0f172a", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800 }}>
-            <span>TOTAL</span>
-            <span>${(inv.total || 0).toLocaleString("es-CO")}</span>
+            <span>TOTAL</span><span>{fmt(inv.total)}</span>
           </div>
-
           {retenciones && (
             <div style={{ marginTop: 10, padding: 10, background: "#fffbeb", borderRadius: 8, borderLeft: "3px solid #f59e0b" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#92400e", letterSpacing: "0.08em", marginBottom: 4 }}>RETENCIONES</div>
               <TaxLine label="ReteFuente" amount={inv.retefuente} percent={inv.retefuente_porcentaje} warn />
               <TaxLine label="ReteIVA" amount={inv.reteiva} percent={inv.reteiva_porcentaje} warn />
               <TaxLine label="ReteICA" amount={inv.reteica} percent={inv.reteica_porcentaje} warn />
-              <div style={{ borderTop: "2px solid #f59e0b", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800, color: "#0f172a" }}>
-                <span>NETO A PAGAR</span>
-                <span>${(inv.total_a_pagar || inv.total || 0).toLocaleString("es-CO")}</span>
+              <div style={{ borderTop: "2px solid #f59e0b", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800 }}>
+                <span>NETO A PAGAR</span><span>{fmt(inv.total_a_pagar || inv.total)}</span>
               </div>
             </div>
           )}
@@ -402,27 +377,29 @@ function InvoiceDetail({ inv, onCausar, onDian, dianOk, software }) {
       </div>
 
       <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button onClick={() => onDian(inv.cufe)} style={{
-          padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer",
-          background: dianOk ? "#dcfce7" : "#fff",
-          color: dianOk ? "#166534" : "#0369a1",
-          border: `1px solid ${dianOk ? "#86efac" : "#bae6fd"}`,
-        }}>
+        <button onClick={() => onDian(inv.cufe)} style={{ padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", background: dianOk ? "#dcfce7" : "#fff", color: dianOk ? "#166534" : "#0369a1", border: `1px solid ${dianOk ? "#86efac" : "#bae6fd"}` }}>
           {dianOk ? "✓ DIAN validada" : "Validar en DIAN"}
         </button>
-
-        <button onClick={handleCausar} disabled={!canCausar} style={{
-          padding: "10px 24px", borderRadius: 8, fontSize: 13, fontWeight: 800,
-          cursor: canCausar ? "pointer" : "not-allowed",
-          background: canCausar ? "#0f172a" : "#94a3b8",
-          color: "#fff", border: "none",
-          opacity: canCausar ? 1 : 0.5,
-        }}>
+        <button onClick={handleCausar} disabled={!canCausar} style={{ padding: "10px 24px", borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: canCausar ? "pointer" : "not-allowed", background: canCausar ? "#0f172a" : "#94a3b8", color: "#fff", border: "none", opacity: canCausar ? 1 : 0.5 }}>
           {saving ? "Causando..." : "Causar factura"}
         </button>
-
         {!canCausar && !saving && <span style={{ fontSize: 11, color: "#f59e0b" }}>Selecciona bodega y cuenta para continuar</span>}
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STAT CARD
+// ═══════════════════════════════════════════════════════════════
+function StatCard({ label, value, color, icon }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", border: "1px solid #e2e8f0", flex: 1, minWidth: 140 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 16 }}>{icon}</span>
+        <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em" }}>{label}</div>
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: color || "#0f172a" }}>{value}</div>
     </div>
   );
 }
@@ -439,31 +416,21 @@ function Dashboard({ session, onLogout }) {
   const [search, setSearch] = useState("");
   const [causadas, setCausadas] = useState(new Set());
   const [dianValidadas, setDianValidadas] = useState(new Set());
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [credentials, setCredentials] = useState(null);
 
   const fetchFacturas = async () => {
     setLoading(true);
     setError("");
     try {
       const url = `${CONFIG.FACTURAS_URL}?nit=${encodeURIComponent(session.nit)}`;
-      console.log("[FACTURAS] GET:", url);
       const res = await fetch(url);
-      console.log("[FACTURAS] Status:", res.status);
-
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const text = await res.text();
-      console.log("[FACTURAS] Respuesta:", text.slice(0, 200));
-
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error("El servidor no devolvió JSON válido");
-      }
-
+      const data = await res.json();
       setFacturas(Array.isArray(data) ? data : (data ? [data] : []));
     } catch (e) {
-      console.error("[FACTURAS] Error:", e);
       setError("No se pudieron cargar las facturas: " + e.message);
       setFacturas([]);
     } finally {
@@ -483,22 +450,19 @@ function Dashboard({ session, onLogout }) {
   const handleCausar = async (inv, extras) => {
     try {
       const payload = {
-        ...inv,
-        ...extras,
+        ...inv, ...extras,
         dianValidada: dianValidadas.has(inv.cufe),
         usuario: session.correo || session.nit,
         empresa_nit: session.nit,
         software_contable: session.software_contable,
         causado_at: new Date().toISOString(),
       };
-      console.log("[CAUSAR] Payload:", payload);
       const res = await fetch(CONFIG.CAUSAR_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
       setCausadas((p) => new Set([...p, inv.cufe]));
       alert(`✓ Factura ${inv.numero_factura} causada en ${session.software_contable}`);
       setExpanded(null);
@@ -509,24 +473,53 @@ function Dashboard({ session, onLogout }) {
 
   const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
 
-  const filtered = facturas.filter((f) => {
-    const causada = causadas.has(f.cufe) || f.estado === "CAUSADA";
-    if (filter === "PENDIENTES" && (causada || !isApproved(f))) return false;
-    if (filter === "CAUSADAS" && !causada) return false;
-    if (search) {
-      const s = search.toLowerCase();
-      if (![f.numero_factura, f.emisor, f.emisor_nit, f.cufe].some((v) => (v || "").toLowerCase().includes(s))) return false;
-    }
-    return true;
-  });
+  const filtered = useMemo(() => {
+    return facturas.filter((f) => {
+      const causada = causadas.has(f.cufe) || f.estado === "CAUSADA";
+      if (filter === "PENDIENTES" && (causada || !isApproved(f))) return false;
+      if (filter === "CAUSADAS" && !causada) return false;
+      if (search) {
+        const s = search.toLowerCase();
+        if (![f.numero_factura, f.emisor, f.emisor_nit, f.cufe].some((v) => (v || "").toLowerCase().includes(s))) return false;
+      }
+      // Filtro de fechas
+      const fechaInv = dateFromInv(f);
+      if (dateFrom && fechaInv) {
+        if (fechaInv < new Date(dateFrom)) return false;
+      }
+      if (dateTo && fechaInv) {
+        const hasta = new Date(dateTo);
+        hasta.setHours(23, 59, 59);
+        if (fechaInv > hasta) return false;
+      }
+      return true;
+    });
+  }, [facturas, filter, search, dateFrom, dateTo, causadas]);
 
-  const counts = {
-    pendientes: facturas.filter((f) => isApproved(f) && !causadas.has(f.cufe) && f.estado !== "CAUSADA").length,
-    causadas: facturas.filter((f) => f.estado === "CAUSADA").length + causadas.size,
+  const stats = useMemo(() => {
+    const aprobadas = facturas.filter(isApproved);
+    const pendientes = aprobadas.filter((f) => !causadas.has(f.cufe) && f.estado !== "CAUSADA");
+    const causadasArr = facturas.filter((f) => f.estado === "CAUSADA" || causadas.has(f.cufe));
+    const totalMonto = filtered.reduce((acc, f) => acc + (Number(f.total) || 0), 0);
+    return {
+      pendientes: pendientes.length,
+      causadas: causadasArr.length,
+      total: aprobadas.length,
+      totalMonto,
+    };
+  }, [facturas, filtered, causadas]);
+
+  const quickDate = (dias) => {
+    const hasta = new Date();
+    const desde = new Date();
+    desde.setDate(desde.getDate() - dias);
+    setDateFrom(desde.toISOString().slice(0, 10));
+    setDateTo(hasta.toISOString().slice(0, 10));
   };
 
   return (
     <div style={{ minHeight: "100vh" }}>
+      {/* Header */}
       <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "18px 24px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
           <div>
@@ -534,16 +527,11 @@ function Dashboard({ session, onLogout }) {
             <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>Causación de Facturas</div>
             <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>NIT {session.nit} · {session.software_contable} · {session.correo}</div>
           </div>
-          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "#10b981" }}>{counts.pendientes}</div>
-              <div style={{ fontSize: 10, color: "#64748b" }}>Pendientes</div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "#6366f1" }}>{counts.causadas}</div>
-              <div style={{ fontSize: 10, color: "#64748b" }}>Causadas</div>
-            </div>
-            <button onClick={onLogout} style={{ padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button onClick={() => setShowSettings(true)} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: credentials ? "#10b981" : "transparent", color: credentials ? "#fff" : "#94a3b8", border: `1px solid ${credentials ? "#10b981" : "#334155"}` }}>
+              {credentials ? "✓ APIs conectadas" : "⚙ Conectar APIs"}
+            </button>
+            <button onClick={onLogout} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
               Cerrar sesión
             </button>
           </div>
@@ -551,36 +539,71 @@ function Dashboard({ session, onLogout }) {
       </div>
 
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 24px" }}>
-        {error && (
-          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#991b1b" }}>
-            {error}
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-          {[
-            { key: "PENDIENTES", label: `Pendientes (${counts.pendientes})` },
-            { key: "CAUSADAS", label: `Causadas (${counts.causadas})` },
-            { key: "ALL", label: `Todas (${facturas.length})` },
-          ].map((f) => (
-            <button key={f.key} onClick={() => setFilter(f.key)} style={{
-              padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
-              background: filter === f.key ? "#0f172a" : "#fff",
-              color: filter === f.key ? "#fff" : "#475569",
-              border: `1px solid ${filter === f.key ? "#0f172a" : "#e2e8f0"}`,
-            }}>{f.label}</button>
-          ))}
-          <input type="text" placeholder="Buscar factura, emisor, CUFE..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 260 }} />
-          <button onClick={fetchFacturas} disabled={loading} style={{ padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", background: "#fff", color: "#475569", border: "1px solid #e2e8f0" }}>
-            {loading ? "⟳" : "Actualizar"}
-          </button>
+        {/* Stats Cards */}
+        <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          <StatCard icon="⏳" label="PENDIENTES" value={stats.pendientes} color="#10b981" />
+          <StatCard icon="✓" label="CAUSADAS" value={stats.causadas} color="#6366f1" />
+          <StatCard icon="📄" label="TOTAL APROBADAS" value={stats.total} />
+          <StatCard icon="💰" label="MONTO FILTRADO" value={fmt(stats.totalMonto)} />
         </div>
 
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#991b1b" }}>{error}</div>}
+
+        {/* Filtros */}
+        <div style={{ background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e2e8f0", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {[
+              { key: "PENDIENTES", label: `Pendientes (${stats.pendientes})` },
+              { key: "CAUSADAS", label: `Causadas (${stats.causadas})` },
+              { key: "ALL", label: `Todas (${stats.total})` },
+            ].map((f) => (
+              <button key={f.key} onClick={() => setFilter(f.key)} style={{
+                padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                background: filter === f.key ? "#0f172a" : "#f8fafc",
+                color: filter === f.key ? "#fff" : "#475569",
+                border: `1px solid ${filter === f.key ? "#0f172a" : "#e2e8f0"}`,
+              }}>{f.label}</button>
+            ))}
+
+            <div style={{ width: 1, height: 24, background: "#e2e8f0", margin: "0 4px" }}></div>
+
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>📅 Desde:</span>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12 }} />
+              <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Hasta:</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12 }} />
+              {(dateFrom || dateTo) && (
+                <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11, cursor: "pointer", color: "#64748b" }}>✕</button>
+              )}
+            </div>
+
+            <input type="text" placeholder="Buscar factura, emisor, CUFE..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 240 }} />
+            <button onClick={fetchFacturas} disabled={loading} style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", background: "#fff", color: "#475569", border: "1px solid #e2e8f0" }}>
+              {loading ? "⟳" : "↻"}
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, alignSelf: "center" }}>ATAJOS:</span>
+            {[
+              { d: 7, l: "Últimos 7 días" },
+              { d: 30, l: "Últimos 30 días" },
+              { d: 90, l: "Últimos 3 meses" },
+              { d: 365, l: "Último año" },
+            ].map(q => (
+              <button key={q.d} onClick={() => quickDate(q.d)} style={{ padding: "4px 10px", borderRadius: 12, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
+                {q.l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Lista */}
         {loading ? (
-          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando facturas...</div>
+          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando...</div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14, background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
-            {facturas.length === 0 ? "No hay facturas para tu empresa todavía." : "No hay facturas que coincidan con el filtro."}
+            {facturas.length === 0 ? "No hay facturas aprobadas para tu empresa." : "No hay facturas que coincidan con los filtros."}
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -596,20 +619,23 @@ function Dashboard({ session, onLogout }) {
                       {isCausada ? "✓" : "📄"}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>{inv.numero_factura}</div>
-                      <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.emisor}</div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <div style={{ fontSize: 14, fontWeight: 700 }}>{inv.numero_factura}</div>
+                        {inv.categoria && <span style={{ fontSize: 9, background: "#ede9fe", color: "#6d28d9", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>{inv.categoria}</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {inv.emisor} · {dateStr(inv.fecha_aprobacion)}
+                      </div>
                     </div>
                     <div style={{ textAlign: "right", minWidth: 110 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a" }}>${(Number(inv.total) || 0).toLocaleString("es-CO")}</div>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{fmt(inv.total)}</div>
                       {hasRet && <div style={{ fontSize: 10, color: "#f59e0b" }}>con retenciones</div>}
                     </div>
                     <div style={{ minWidth: 90 }}><Risk level={inv.risk_level} score={inv.risk_score} /></div>
                     <div style={{ minWidth: 110 }}><Badge status={isCausada ? "CAUSADA" : inv.estado} /></div>
                     <div style={{ fontSize: 16, color: "#94a3b8", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</div>
                   </div>
-                  {isExpanded && !isCausada && (
-                    <InvoiceDetail inv={inv} onCausar={handleCausar} onDian={handleDian} dianOk={dianValidadas.has(inv.cufe)} software={session.software_contable} />
-                  )}
+                  {isExpanded && !isCausada && <InvoiceDetail inv={inv} onCausar={handleCausar} onDian={handleDian} dianOk={dianValidadas.has(inv.cufe)} software={session.software_contable} />}
                   {isExpanded && isCausada && (
                     <div style={{ background: "#f0fdf4", padding: 20, borderTop: "1px solid #dcfce7", textAlign: "center", color: "#166534", fontSize: 13 }}>
                       ✓ Esta factura ya fue causada
@@ -621,6 +647,15 @@ function Dashboard({ session, onLogout }) {
           </div>
         )}
       </div>
+
+      {showSettings && (
+        <ApiSettingsModal
+          session={session}
+          credentials={credentials}
+          onClose={() => setShowSettings(false)}
+          onSave={(creds) => { setCredentials(creds); setShowSettings(false); alert("✓ Credenciales guardadas"); }}
+        />
+      )}
     </div>
   );
 }
