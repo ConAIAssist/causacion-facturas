@@ -560,6 +560,9 @@ function Dashboard({ session, onLogout }) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : { success: false, error: 'Respuesta vacía' };
+      if (!data.success) throw new Error(data.error || 'Error desconocido');
       setCausadas((p) => new Set([...p, inv.cufe]));
       alert(`✓ Factura ${inv.numero_factura} causada en ${session.software_contable}`);
       setExpanded(null);
