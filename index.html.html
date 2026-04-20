@@ -30,6 +30,7 @@ const CONFIG = {
   ERP_PARAMS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/erp-params",
   DIAN_VALIDATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/dian-validate",
   SAVE_CREDENTIALS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/save-credentials",
+  DELETE_CREDENTIALS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/delete-credentials",
 };
 
 // Solo se guarda la URL sugerida del API por software, nada más
@@ -111,18 +112,43 @@ function LoginScreen({ onLogin }) {
 // ═══════════════════════════════════════════════════════════════
 // MODAL DE CONFIGURACIÓN DE APIs
 // ═══════════════════════════════════════════════════════════════
-function ApiSettingsModal({ session, credentials, onSave, onClose }) {
+function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [dianUrl, setDianUrl] = useState(credentials?.dianUrl || "");
   const [erpKey, setErpKey] = useState(credentials?.erpKey || "");
   const [erpUser, setErpUser] = useState(credentials?.erpUser || "");
   const [erpUrl, setErpUrl] = useState(credentials?.erpUrl || SOFTWARE_API_URLS[session.software_contable] || "");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const handleSave = async () => {
     setSaving(true);
     await onSave({ dianUrl, erpKey, erpUser, erpUrl });
     setSaving(false);
   };
+
+  const handleDelete = async () => {
+    if (!confirm("¿Seguro que quieres olvidar las credenciales guardadas? Tendrás que volver a ingresarlas la próxima vez.")) return;
+    setDeleting(true);
+    await onDelete();
+    setDeleting(false);
+  };
+
+  // "Hace X tiempo" a partir del ISO de updatedAt
+  const relativeTime = (iso) => {
+    if (!iso) return null;
+    const diff = Date.now() - new Date(iso).getTime();
+    if (isNaN(diff)) return null;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "hace un momento";
+    if (mins < 60) return `hace ${mins} min`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `hace ${hrs} h`;
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return `hace ${days} día${days > 1 ? "s" : ""}`;
+    const months = Math.floor(days / 30);
+    return `hace ${months} mes${months > 1 ? "es" : ""}`;
+  };
+  const lastUpdated = relativeTime(credentials?.updatedAt);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -165,11 +191,24 @@ function ApiSettingsModal({ session, credentials, onSave, onClose }) {
           🔒 Las credenciales se guardan encriptadas en n8n y nunca salen de tu cuenta.
         </div>
 
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
-          <button onClick={handleSave} disabled={saving} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.6 : 1 }}>
-            {saving ? "Guardando..." : "Guardar credenciales"}
-          </button>
+        {lastUpdated && (
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 16, textAlign: "right", fontStyle: "italic" }}>
+            Última actualización: {lastUpdated}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
+          {credentials?.erpKey ? (
+            <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #fecaca", background: "#fff", fontSize: 12, fontWeight: 600, cursor: deleting ? "not-allowed" : "pointer", color: "#b91c1c", opacity: deleting ? 0.6 : 1 }}>
+              {deleting ? "Olvidando..." : "Olvidar credenciales"}
+            </button>
+          ) : <span />}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onClose} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
+            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.6 : 1 }}>
+              {saving ? "Guardando..." : "Guardar credenciales"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -798,7 +837,8 @@ function Dashboard({ session, onLogout }) {
               const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
               if (!data.success) throw new Error(data.error || "Error al guardar");
 
-              setCredentials(creds);
+              // Al guardar ok, actualizar updatedAt local al momento actual para feedback inmediato
+              setCredentials({ ...creds, updatedAt: data.updated_at || new Date().toISOString() });
               setShowSettings(false);
               alert("✓ Credenciales guardadas. Cargando parámetros del ERP...");
             } catch (e) {
@@ -806,6 +846,26 @@ function Dashboard({ session, onLogout }) {
               setCredentials(creds);
               setShowSettings(false);
               alert("⚠ Credenciales aplicadas localmente, pero no se pudieron guardar en el servidor: " + e.message + "\nTendrás que volver a ingresarlas la próxima vez.");
+            }
+          }}
+          onDelete={async () => {
+            try {
+              const res = await fetch(CONFIG.DELETE_CREDENTIALS_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ nit: session.nit }),
+              });
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              const text = await res.text();
+              const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+              if (!data.success) throw new Error(data.error || "Error al olvidar credenciales");
+
+              setCredentials(null);
+              setErpParams(null);
+              setShowSettings(false);
+              alert("✓ Credenciales olvidadas. Conecta APIs nuevas cuando lo necesites.");
+            } catch (e) {
+              alert("⚠ No se pudieron olvidar las credenciales en el servidor: " + e.message);
             }
           }}
         />
@@ -822,7 +882,5 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
-</body>
-</html>
 </body>
 </html>
