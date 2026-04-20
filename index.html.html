@@ -21,7 +21,7 @@
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useMemo } = React;
+const { useState, useEffect, useMemo, useRef } = React;
 
 const CONFIG = {
   LOGIN_URL:    "https://conaiassist.app.n8n.cloud/webhook/api/login",
@@ -31,6 +31,7 @@ const CONFIG = {
   DIAN_VALIDATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/dian-validate",
   SAVE_CREDENTIALS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/save-credentials",
   DELETE_CREDENTIALS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/delete-credentials",
+  ASSISTANT_URL: "https://conaiassist.app.n8n.cloud/webhook/api/assistant-chat",
 };
 
 // Solo se guarda la URL sugerida del API por software, nada más
@@ -519,9 +520,244 @@ function EmptyState({ icon, title, message }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ASISTENTE DE AYUDA CONTABLE (FAB + Chat)
+// ═══════════════════════════════════════════════════════════════
+function getQuickPrompts(ctx) {
+  if (!ctx.session) {
+    return [
+      "¿Qué es este sistema y cómo funciona?",
+      "¿Cómo cambio mi contraseña?",
+      "¿Qué documentos procesa el asistente?",
+    ];
+  }
+  if (ctx.currentInvoice) {
+    return [
+      "¿Qué cuenta contable debería usar para esta factura?",
+      "Explícame las retenciones de esta factura",
+      "¿Es deducible este gasto?",
+    ];
+  }
+  return [
+    "¿Qué significa la cuenta 5110?",
+    "¿Cómo causo una factura de servicios?",
+    "Diferencia entre gasto y costo",
+    "¿Qué es el PUC?",
+  ];
+}
+
+function AssistantMessage({ role, content }) {
+  const isUser = role === "user";
+  return (
+    <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
+      <div style={{
+        maxWidth: "85%",
+        padding: "10px 14px",
+        borderRadius: 14,
+        background: isUser ? "#0f172a" : "#f1f5f9",
+        color: isUser ? "#fff" : "#0f172a",
+        fontSize: 13,
+        lineHeight: 1.5,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}>
+        {content}
+      </div>
+    </div>
+  );
+}
+
+function AssistantChat({ open, onClose, context }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef(null);
+
+  // Mensaje inicial según contexto
+  useEffect(() => {
+    if (!open) return;
+    if (messages.length === 0) {
+      const greeting = context.session
+        ? `Hola 👋 Soy tu asistente contable. Puedo ayudarte con el PUC, clasificación de gastos en ${context.session.software_contable || "tu software contable"}, o cualquier duda del proceso.`
+        : "Hola 👋 Soy el asistente contable. Antes de iniciar sesión puedo responder dudas generales sobre el sistema o sobre contabilidad.";
+      setMessages([{ role: "assistant", content: greeting }]);
+    }
+  }, [open]);
+
+  // Auto-scroll al último mensaje
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, sending]);
+
+  const send = async (text) => {
+    const userMsg = (text || input).trim();
+    if (!userMsg || sending) return;
+    const newMessages = [...messages, { role: "user", content: userMsg }];
+    setMessages(newMessages);
+    setInput("");
+    setSending(true);
+
+    try {
+      const res = await fetch(CONFIG.ASSISTANT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: newMessages.filter(m => m.role !== "system"),
+          context: {
+            nit: context.session?.nit || null,
+            empresa: context.session?.empresa || null,
+            software_contable: context.session?.software_contable || null,
+            actividad: context.session?.actividad || null,
+            erp_fields: context.erpParams?.fields || null,
+            currentInvoice: context.currentInvoice || null,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : { reply: "(Respuesta vacía del servidor)" };
+      setMessages([...newMessages, { role: "assistant", content: data.reply || "(sin respuesta)" }]);
+    } catch (e) {
+      setMessages([...newMessages, { role: "assistant", content: "⚠ Error: " + e.message }]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (!open) return null;
+
+  const quickPrompts = getQuickPrompts(context);
+
+  return (
+    <div
+      className="fade-in"
+      style={{
+        position: "fixed",
+        bottom: 90,
+        right: 20,
+        width: 380,
+        maxWidth: "calc(100vw - 40px)",
+        height: 560,
+        maxHeight: "calc(100vh - 120px)",
+        background: "#fff",
+        borderRadius: 16,
+        boxShadow: "0 25px 70px rgba(15, 23, 42, 0.35)",
+        display: "flex",
+        flexDirection: "column",
+        zIndex: 99,
+        border: "1px solid #e2e8f0",
+        overflow: "hidden",
+      }}
+    >
+      {/* Header */}
+      <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "14px 16px", color: "#fff" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 9, letterSpacing: "0.2em", color: "#94a3b8", fontWeight: 600 }}>ASISTENTE OPUS 4.6</div>
+            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>💬 Ayuda contable</div>
+          </div>
+          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", width: 28, height: 28, borderRadius: 8, cursor: "pointer", fontSize: 14 }}>×</button>
+        </div>
+        {context.currentInvoice && (
+          <div style={{ marginTop: 8, fontSize: 10, color: "#94a3b8" }}>
+            Contexto: Factura {context.currentInvoice.numero_factura} · {context.currentInvoice.emisor}
+          </div>
+        )}
+      </div>
+
+      {/* Mensajes */}
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 14, background: "#fafbfc" }}>
+        {messages.map((m, i) => <AssistantMessage key={i} role={m.role} content={m.content} />)}
+        {sending && (
+          <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 10 }}>
+            <div style={{ padding: "10px 14px", borderRadius: 14, background: "#f1f5f9", fontSize: 13, color: "#64748b" }}>
+              <span className="spin">⟳</span> Pensando...
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sugerencias rápidas (solo cuando no hay muchos mensajes) */}
+      {messages.length <= 2 && !sending && (
+        <div style={{ padding: "8px 14px", borderTop: "1px solid #e2e8f0", background: "#fafbfc", display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {quickPrompts.map((p, i) => (
+            <button key={i} onClick={() => send(p)} style={{
+              padding: "5px 10px",
+              borderRadius: 14,
+              border: "1px solid #cbd5e1",
+              background: "#fff",
+              fontSize: 10,
+              color: "#475569",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}>
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Input */}
+      <div style={{ padding: 12, borderTop: "1px solid #e2e8f0", background: "#fff", display: "flex", gap: 8 }}>
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") send(); }}
+          placeholder="Pregunta sobre contabilidad, PUC, cuentas..."
+          disabled={sending}
+          style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
+        />
+        <button
+          onClick={() => send()}
+          disabled={sending || !input.trim()}
+          style={{ padding: "0 16px", borderRadius: 10, border: "none", background: sending || !input.trim() ? "#cbd5e1" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: sending || !input.trim() ? "not-allowed" : "pointer" }}
+        >
+          ↑
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AssistantFAB({ context }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <React.Fragment>
+      <button
+        onClick={() => setOpen(!open)}
+        aria-label="Abrir asistente"
+        style={{
+          position: "fixed",
+          bottom: 20,
+          right: 20,
+          width: 56,
+          height: 56,
+          borderRadius: "50%",
+          border: "none",
+          background: open ? "#334155" : "linear-gradient(135deg, #0f172a, #1e293b)",
+          color: "#fff",
+          fontSize: 22,
+          cursor: "pointer",
+          boxShadow: "0 8px 24px rgba(15, 23, 42, 0.35)",
+          zIndex: 98,
+          transition: "transform 0.15s, background 0.15s",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
+        onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+      >
+        {open ? "×" : "💬"}
+      </button>
+      <AssistantChat open={open} onClose={() => setOpen(false)} context={context} />
+    </React.Fragment>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════
-function Dashboard({ session, onLogout }) {
+function Dashboard({ session, onLogout, onContextChange }) {
   const [facturas, setFacturas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -590,6 +826,17 @@ function Dashboard({ session, onLogout }) {
 
   useEffect(() => { fetchFacturas(); }, []);
   useEffect(() => { if (credentials) fetchErpParams(credentials); }, [credentials]);
+
+  // ⬇️ Reportar cambios de contexto al App (para el asistente)
+  useEffect(() => {
+    if (onContextChange) onContextChange({ erpParams });
+  }, [erpParams]);
+
+  useEffect(() => {
+    if (!onContextChange) return;
+    const current = expanded ? facturas.find(f => f.cufe === expanded) : null;
+    onContextChange({ currentInvoice: current });
+  }, [expanded, facturas]);
 
   const handleCausar = async (inv, extras) => {
     try {
@@ -876,8 +1123,32 @@ function Dashboard({ session, onLogout }) {
 
 function App() {
   const [session, setSession] = useState(null);
-  if (!session) return <LoginScreen onLogin={setSession} />;
-  return <Dashboard session={session} onLogout={() => setSession(null)} />;
+  // Contexto compartido para el asistente (cambia cuando entra sesión, se carga ERP o se expande una factura)
+  const [assistantContext, setAssistantContext] = useState({
+    session: null,
+    erpParams: null,
+    currentInvoice: null,
+  });
+
+  // Mantener el contexto sincronizado con la sesión
+  useEffect(() => {
+    setAssistantContext((c) => ({ ...c, session }));
+  }, [session]);
+
+  return (
+    <React.Fragment>
+      {!session ? (
+        <LoginScreen onLogin={setSession} />
+      ) : (
+        <Dashboard
+          session={session}
+          onLogout={() => setSession(null)}
+          onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))}
+        />
+      )}
+      <AssistantFAB context={assistantContext} />
+    </React.Fragment>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
