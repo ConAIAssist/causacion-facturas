@@ -140,8 +140,7 @@ function LoginScreen({ onLogin }) {
 // MODAL DE CONFIGURACIÓN DE APIs
 // ═══════════════════════════════════════════════════════════════
 function ApiSettingsModal({ session, credentials, onSave, onClose }) {
-  const [dianUser, setDianUser] = useState(credentials?.dianUser || "");
-  const [dianPass, setDianPass] = useState(credentials?.dianPass || "");
+  const [dianUrl, setDianUrl] = useState(credentials?.dianUrl || "");
   const [erpKey, setErpKey] = useState(credentials?.erpKey || "");
   const [erpUser, setErpUser] = useState(credentials?.erpUser || "");
   const [erpUrl, setErpUrl] = useState(credentials?.erpUrl || SOFTWARE_PARAMS[session.software_contable]?.apiUrl || "");
@@ -149,7 +148,7 @@ function ApiSettingsModal({ session, credentials, onSave, onClose }) {
 
   const handleSave = async () => {
     setSaving(true);
-    await onSave({ dianUser, dianPass, erpKey, erpUser, erpUrl });
+    await onSave({ dianUrl, erpKey, erpUser, erpUrl });
     setSaving(false);
   };
 
