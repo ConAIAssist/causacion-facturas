@@ -6,6 +6,8 @@
 <title>Causación de Facturas · Asistente Opus 4.6</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
   * { box-sizing: border-box; }
@@ -15,6 +17,7 @@
   @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
   .fade-in { animation: fadeIn 0.3s ease-out; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .recharts-tooltip-wrapper { outline: none !important; }
 </style>
 </head>
 <body>
@@ -22,6 +25,10 @@
 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo, useRef } = React;
+const {
+  ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area,
+} = window.Recharts;
 
 const CONFIG = {
   LOGIN_URL:    "https://conaiassist.app.n8n.cloud/webhook/api/login",
@@ -47,8 +54,55 @@ const SOFTWARE_API_URLS = {
   Odoo: "https://tuinstancia.odoo.com",
 };
 
+// Paleta de colores consistente para gráficas
+const CHART_COLORS = {
+  primary: "#0f172a",
+  pendiente: "#f59e0b",
+  causada: "#10b981",
+  aprobada: "#3b82f6",
+  risk_bajo: "#16a34a",
+  risk_medio: "#f59e0b",
+  risk_alto: "#ef4444",
+  retefuente: "#8b5cf6",
+  reteiva: "#ec4899",
+  reteica: "#f97316",
+  palette: ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#ef4444", "#6366f1"],
+};
+
 // ═══════════════════════════════════════════════════════════════
-// AUTH LAYOUT (contenedor compartido para pantallas de auth)
+// UTILIDADES (compartidas entre tabs)
+// ═══════════════════════════════════════════════════════════════
+function fmt(n) { return "$" + (Number(n) || 0).toLocaleString("es-CO"); }
+function fmtCompact(n) {
+  const num = Number(n) || 0;
+  if (Math.abs(num) >= 1e9) return "$" + (num / 1e9).toFixed(1) + "B";
+  if (Math.abs(num) >= 1e6) return "$" + (num / 1e6).toFixed(1) + "M";
+  if (Math.abs(num) >= 1e3) return "$" + (num / 1e3).toFixed(0) + "K";
+  return "$" + num.toLocaleString("es-CO");
+}
+function dateFromInv(inv) {
+  const d = inv.fecha_aprobacion || inv.processed_at || inv.causado_at;
+  return d ? new Date(d) : null;
+}
+function dateStr(d) {
+  if (!d) return "—";
+  const dt = new Date(d);
+  return dt.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
+}
+function monthLabel(d) {
+  const dt = new Date(d);
+  const meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+  return `${meses[dt.getMonth()]} ${String(dt.getFullYear()).slice(2)}`;
+}
+function weekStart(d) {
+  const dt = new Date(d);
+  const day = dt.getDay();
+  const diff = dt.getDate() - day + (day === 0 ? -6 : 1); // Lunes
+  return new Date(dt.setDate(diff));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// AUTH LAYOUT
 // ═══════════════════════════════════════════════════════════════
 function AuthLayout({ title, subtitle, children }) {
   return (
@@ -65,9 +119,6 @@ function AuthLayout({ title, subtitle, children }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// LOGIN (NIT + contraseña + link a olvidé mi contraseña)
-// ═══════════════════════════════════════════════════════════════
 function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
   const [nit, setNit] = useState("");
   const [password, setPassword] = useState("");
@@ -78,39 +129,24 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
     e.preventDefault();
     setError("");
     const nitLimpio = nit.replace(/\D/g, "");
-    if (!nitLimpio || nitLimpio.length < 6) {
-      setError("Ingresa un NIT válido (mínimo 6 dígitos)");
-      return;
-    }
-    if (!password) {
-      setError("Ingresa tu contraseña");
-      return;
-    }
+    if (!nitLimpio || nitLimpio.length < 6) { setError("Ingresa un NIT válido (mínimo 6 dígitos)"); return; }
+    if (!password) { setError("Ingresa tu contraseña"); return; }
     setLoading(true);
     try {
       const res = await fetch(CONFIG.LOGIN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nit: nitLimpio, password }),
       });
       if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
       const text = await res.text();
       const data = text ? JSON.parse(text) : { valid: false, error: "NIT o contraseña incorrectos" };
-      if (!data.valid) {
-        setError(data.error || "NIT o contraseña incorrectos");
-        setLoading(false);
-        return;
-      }
+      if (!data.valid) { setError(data.error || "NIT o contraseña incorrectos"); setLoading(false); return; }
       if (data.requires_password_change) {
         onRequirePasswordChange({ nit: nitLimpio, change_token: data.change_token });
-        setLoading(false);
-        return;
+        setLoading(false); return;
       }
       onLogin({ ...data, nit: nitLimpio });
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-    }
+    } catch (err) { setError(err.message); setLoading(false); }
   };
 
   return (
@@ -119,13 +155,13 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
           <input type="text" value={nit} onChange={(e) => setNit(e.target.value)} placeholder="Ej: 800456789" autoFocus disabled={loading}
-            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }} />
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
           <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Solo números, sin dígito de verificación</div>
         </div>
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONTRASEÑA</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" disabled={loading}
-            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }} />
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
         </div>
         {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
         <button type="submit" disabled={loading || !nit || !password} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit || !password ? "not-allowed" : "pointer", background: loading || !nit || !password ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !nit || !password ? 0.6 : 1 }}>
@@ -141,9 +177,6 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// FORGOT PASSWORD (NIT + correo → solicita email de reset)
-// ═══════════════════════════════════════════════════════════════
 function ForgotPasswordScreen({ onBack }) {
   const [nit, setNit] = useState("");
   const [correo, setCorreo] = useState("");
@@ -155,29 +188,18 @@ function ForgotPasswordScreen({ onBack }) {
     e.preventDefault();
     setError("");
     const nitLimpio = nit.replace(/\D/g, "");
-    if (!nitLimpio || nitLimpio.length < 6) {
-      setError("Ingresa un NIT válido");
-      return;
-    }
-    if (!correo || !correo.includes("@")) {
-      setError("Ingresa un correo válido");
-      return;
-    }
+    if (!nitLimpio || nitLimpio.length < 6) { setError("Ingresa un NIT válido"); return; }
+    if (!correo || !correo.includes("@")) { setError("Ingresa un correo válido"); return; }
     setLoading(true);
     try {
       const res = await fetch(CONFIG.REQUEST_RESET_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nit: nitLimpio, correo: correo.trim() }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Por privacidad, la respuesta siempre es success=true aunque los datos no coincidan.
       setSubmitted(true);
-    } catch (err) {
-      setError("No se pudo procesar la solicitud. Intenta de nuevo más tarde.");
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { setError("No se pudo procesar la solicitud. Intenta de nuevo más tarde."); }
+    finally { setLoading(false); }
   };
 
   if (submitted) {
@@ -187,7 +209,7 @@ function ForgotPasswordScreen({ onBack }) {
           ✓ Solicitud enviada
         </div>
         <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5, marginBottom: 16 }}>
-          El enlace expira en 30 minutos. Si no recibes el correo en pocos minutos, verifica la bandeja de spam o vuelve a intentarlo con los datos correctos.
+          El enlace expira en 30 minutos. Si no recibes el correo en pocos minutos, verifica la bandeja de spam.
         </div>
         <button onClick={onBack} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
           Volver al inicio de sesión
@@ -208,23 +230,17 @@ function ForgotPasswordScreen({ onBack }) {
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CORREO REGISTRADO</label>
           <input type="email" value={correo} onChange={(e) => setCorreo(e.target.value)} placeholder="empresa@correo.com" disabled={loading}
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
-          <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Debe ser el mismo correo con que se registró la empresa</div>
         </div>
         {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
-        <button type="submit" disabled={loading || !nit || !correo} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit || !correo ? "not-allowed" : "pointer", background: loading || !nit || !correo ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !nit || !correo ? 0.6 : 1, marginBottom: 10 }}>
+        <button type="submit" disabled={loading || !nit || !correo} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit || !correo ? "not-allowed" : "pointer", background: loading || !nit || !correo ? "#94a3b8" : "#0f172a", color: "#fff", marginBottom: 10 }}>
           {loading ? <span><span className="spin">⟳</span> Enviando...</span> : "Enviar enlace"}
         </button>
-        <button type="button" onClick={onBack} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
-          Cancelar
-        </button>
+        <button type="button" onClick={onBack} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
       </form>
     </AuthLayout>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// RESET PASSWORD (desde ?reset_token=XXX)
-// ═══════════════════════════════════════════════════════════════
 function ResetPasswordScreen({ token, onSuccess }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -237,27 +253,18 @@ function ResetPasswordScreen({ token, onSuccess }) {
     setError("");
     if (newPassword.length < 8) { setError("La contraseña debe tener al menos 8 caracteres"); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
-
     setLoading(true);
     try {
       const res = await fetch(CONFIG.RESET_PASSWORD_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, newPassword }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
-      if (!data.success) {
-        setError(data.error || "No se pudo restablecer la contraseña");
-        setLoading(false);
-        return;
-      }
+      if (!data.success) { setError(data.error || "No se pudo restablecer la contraseña"); setLoading(false); return; }
       setSuccess(true);
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-    }
+    } catch (err) { setError(err.message); setLoading(false); }
   };
 
   if (success) {
@@ -287,7 +294,7 @@ function ResetPasswordScreen({ token, onSuccess }) {
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
         </div>
         {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
-        <button type="submit" disabled={loading || !newPassword || !confirm} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !newPassword || !confirm ? "not-allowed" : "pointer", background: loading || !newPassword || !confirm ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !newPassword || !confirm ? 0.6 : 1 }}>
+        <button type="submit" disabled={loading || !newPassword || !confirm} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !newPassword || !confirm ? "not-allowed" : "pointer", background: loading || !newPassword || !confirm ? "#94a3b8" : "#0f172a", color: "#fff" }}>
           {loading ? <span><span className="spin">⟳</span> Guardando...</span> : "Restablecer contraseña"}
         </button>
       </form>
@@ -295,16 +302,12 @@ function ResetPasswordScreen({ token, onSuccess }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// CHANGE PASSWORD (forzado tras login temp, o voluntario desde dashboard)
-// ═══════════════════════════════════════════════════════════════
 function ChangePasswordScreen({ mode, nit, changeToken, onSuccess, onCancel }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
   const isForced = mode === "forced";
 
   const handleSubmit = async (e) => {
@@ -313,40 +316,28 @@ function ChangePasswordScreen({ mode, nit, changeToken, onSuccess, onCancel }) {
     if (newPassword.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres"); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
     if (!isForced && !currentPassword) { setError("Ingresa tu contraseña actual"); return; }
-
     setLoading(true);
     try {
       const payload = { nit, newPassword };
       if (isForced) payload.change_token = changeToken;
       else payload.currentPassword = currentPassword;
-
       const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
-      if (!data.success) {
-        setError(data.error || "No se pudo cambiar la contraseña");
-        setLoading(false);
-        return;
-      }
+      if (!data.success) { setError(data.error || "No se pudo cambiar la contraseña"); setLoading(false); return; }
       onSuccess();
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-    }
+    } catch (err) { setError(err.message); setLoading(false); }
   };
 
-  const title = isForced ? "Cambia tu contraseña" : "Cambiar contraseña";
-  const subtitle = isForced
-    ? "Por seguridad, debes cambiar la contraseña temporal antes de continuar"
-    : "Ingresa tu contraseña actual y la nueva";
-
   return (
-    <AuthLayout title={title} subtitle={subtitle}>
+    <AuthLayout
+      title={isForced ? "Cambia tu contraseña" : "Cambiar contraseña"}
+      subtitle={isForced ? "Por seguridad, debes cambiar la contraseña temporal antes de continuar" : "Ingresa tu contraseña actual y la nueva"}
+    >
       <form onSubmit={handleSubmit}>
         {!isForced && (
           <div style={{ marginBottom: 14 }}>
@@ -370,9 +361,7 @@ function ChangePasswordScreen({ mode, nit, changeToken, onSuccess, onCancel }) {
           {loading ? <span><span className="spin">⟳</span> Guardando...</span> : "Guardar nueva contraseña"}
         </button>
         {!isForced && (
-          <button type="button" onClick={onCancel} disabled={loading} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
-            Cancelar
-          </button>
+          <button type="button" onClick={onCancel} disabled={loading} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
         )}
       </form>
     </AuthLayout>
@@ -380,7 +369,7 @@ function ChangePasswordScreen({ mode, nit, changeToken, onSuccess, onCancel }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MODAL DE CONFIGURACIÓN DE APIs (SIN CAMBIOS)
+// MODAL DE CONFIGURACIÓN DE APIs (sin cambios)
 // ═══════════════════════════════════════════════════════════════
 function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [dianUrl, setDianUrl] = useState(credentials?.dianUrl || "");
@@ -390,17 +379,10 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const handleSave = async () => {
-    setSaving(true);
-    await onSave({ dianUrl, erpKey, erpUser, erpUrl });
-    setSaving(false);
-  };
-
+  const handleSave = async () => { setSaving(true); await onSave({ dianUrl, erpKey, erpUser, erpUrl }); setSaving(false); };
   const handleDelete = async () => {
-    if (!confirm("¿Seguro que quieres olvidar las credenciales guardadas? Tendrás que volver a ingresarlas la próxima vez.")) return;
-    setDeleting(true);
-    await onDelete();
-    setDeleting(false);
+    if (!confirm("¿Seguro que quieres olvidar las credenciales guardadas?")) return;
+    setDeleting(true); await onDelete(); setDeleting(false);
   };
 
   const relativeTime = (iso) => {
@@ -429,52 +411,39 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
           </div>
           <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
         </div>
-
         <div style={{ background: "#f8fafc", borderRadius: 10, padding: 16, marginBottom: 16, border: "1px solid #e2e8f0" }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 10, letterSpacing: "0.1em" }}>🏛 PORTAL DIAN</div>
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>Pega el enlace de validación de la DIAN de tu empresa. Se usará para validar automáticamente cada factura.</div>
-          <div>
-            <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>URL DE VALIDACIÓN DIAN</label>
-            <input type="text" value={dianUrl} onChange={(e) => setDianUrl(e.target.value)} placeholder="https://catalogo-vpfe.dian.gov.co/..." style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
-          </div>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>Pega el enlace de validación de la DIAN de tu empresa.</div>
+          <input type="text" value={dianUrl} onChange={(e) => setDianUrl(e.target.value)} placeholder="https://catalogo-vpfe.dian.gov.co/..." style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
         </div>
-
         <div style={{ background: "#f0f9ff", borderRadius: 10, padding: 16, marginBottom: 20, border: "1px solid #bae6fd" }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 10, letterSpacing: "0.1em" }}>⚙ API DE {session.software_contable?.toUpperCase()}</div>
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 12 }}>Al conectar el software contable, las opciones de causación (bodegas, cuentas, centros de costo) se cargarán automáticamente.</div>
           <div style={{ marginBottom: 10 }}>
             <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>URL DEL API</label>
-            <input type="text" value={erpUrl} onChange={(e) => setErpUrl(e.target.value)} placeholder="https://api.siigo.com" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
+            <input type="text" value={erpUrl} onChange={(e) => setErpUrl(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
           </div>
           <div style={{ marginBottom: 10 }}>
             <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>USUARIO / EMAIL</label>
-            <input type="text" value={erpUser} onChange={(e) => setErpUser(e.target.value)} placeholder="tu@empresa.com" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
+            <input type="text" value={erpUser} onChange={(e) => setErpUser(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
           </div>
           <div>
             <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>API KEY / TOKEN</label>
-            <input type="password" value={erpKey} onChange={(e) => setErpKey(e.target.value)} placeholder="••••••••••••••••" style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
+            <input type="password" value={erpKey} onChange={(e) => setErpKey(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
           </div>
         </div>
-
         <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: "#92400e" }}>
           🔒 Las credenciales se guardan encriptadas en n8n y nunca salen de tu cuenta.
         </div>
-
-        {lastUpdated && (
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 16, textAlign: "right", fontStyle: "italic" }}>
-            Última actualización: {lastUpdated}
-          </div>
-        )}
-
+        {lastUpdated && <div style={{ fontSize: 11, color: "#64748b", marginBottom: 16, textAlign: "right", fontStyle: "italic" }}>Última actualización: {lastUpdated}</div>}
         <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
           {credentials?.erpKey ? (
-            <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #fecaca", background: "#fff", fontSize: 12, fontWeight: 600, cursor: deleting ? "not-allowed" : "pointer", color: "#b91c1c", opacity: deleting ? 0.6 : 1 }}>
+            <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #fecaca", background: "#fff", fontSize: 12, fontWeight: 600, cursor: deleting ? "not-allowed" : "pointer", color: "#b91c1c" }}>
               {deleting ? "Olvidando..." : "Olvidar credenciales"}
             </button>
           ) : <span />}
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={onClose} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
-            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.6 : 1 }}>
+            <button onClick={handleSave} disabled={saving || deleting} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer" }}>
               {saving ? "Guardando..." : "Guardar credenciales"}
             </button>
           </div>
@@ -485,19 +454,8 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// UTILIDADES
+// COMPONENTES COMPARTIDOS (sin cambios)
 // ═══════════════════════════════════════════════════════════════
-function fmt(n) { return "$" + (Number(n) || 0).toLocaleString("es-CO"); }
-function dateFromInv(inv) {
-  const d = inv.fecha_aprobacion || inv.processed_at || inv.causado_at;
-  return d ? new Date(d) : null;
-}
-function dateStr(d) {
-  if (!d) return "—";
-  const dt = new Date(d);
-  return dt.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
-}
-
 function Badge({ status }) {
   const S = {
     APROBADA: { bg: "#dcfce7", color: "#166534", label: "Aprobada" },
@@ -526,7 +484,7 @@ function SelectField({ label, value, opts, onChange, required, disabled, emptyMs
   return (
     <div>
       <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>{label} {required && <span style={{ color: "#ef4444" }}>*</span>}</div>
-      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled || opts.length === 0} style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, background: disabled || opts.length === 0 ? "#f8fafc" : "#fff", cursor: disabled || opts.length === 0 ? "not-allowed" : "pointer", boxSizing: "border-box", color: disabled || opts.length === 0 ? "#94a3b8" : "#0f172a" }}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled || opts.length === 0} style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, background: disabled || opts.length === 0 ? "#f8fafc" : "#fff", cursor: disabled || opts.length === 0 ? "not-allowed" : "pointer", boxSizing: "border-box" }}>
         <option value="">{opts.length === 0 ? (emptyMsg || "Conecta el API para ver opciones") : "Seleccionar..."}</option>
         {opts.map((o) => <option key={typeof o === 'string' ? o : o.id} value={typeof o === 'string' ? o : o.id}>{typeof o === 'string' ? o : o.label}</option>)}
       </select>
@@ -549,29 +507,12 @@ function AiInsights({ inv }) {
     <div style={{ background: "linear-gradient(135deg, #f5f3ff, #eef2ff)", borderRadius: 10, padding: 14, border: "1px solid #ddd6fe", marginBottom: 16 }}>
       <div style={{ fontSize: 10, fontWeight: 700, color: "#6d28d9", letterSpacing: "0.1em", marginBottom: 10 }}>🧠 ANÁLISIS AUTOMÁTICO</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 12 }}>
-        <div>
-          <div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>CATEGORÍA IA</div>
-          <div style={{ fontWeight: 600 }}>{inv.categoria || "—"}</div>
-          {inv.subcategoria && <div style={{ fontSize: 11, color: "#6d28d9" }}>{inv.subcategoria}</div>}
-        </div>
-        <div>
-          <div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>TIPO CONTABLE</div>
-          <div style={{ fontWeight: 600 }}>{inv.tipo_contable || "—"}</div>
-        </div>
-        <div>
-          <div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>DEPARTAMENTO SUGERIDO</div>
-          <div style={{ fontWeight: 600 }}>{inv.departamento_asignado || "—"}</div>
-        </div>
-        <div>
-          <div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>NIVEL DE RIESGO</div>
-          <div><Risk level={inv.risk_level} score={inv.risk_score} /></div>
-        </div>
+        <div><div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>CATEGORÍA IA</div><div style={{ fontWeight: 600 }}>{inv.categoria || "—"}</div>{inv.subcategoria && <div style={{ fontSize: 11, color: "#6d28d9" }}>{inv.subcategoria}</div>}</div>
+        <div><div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>TIPO CONTABLE</div><div style={{ fontWeight: 600 }}>{inv.tipo_contable || "—"}</div></div>
+        <div><div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>DEPARTAMENTO SUGERIDO</div><div style={{ fontWeight: 600 }}>{inv.departamento_asignado || "—"}</div></div>
+        <div><div style={{ color: "#64748b", fontSize: 10, marginBottom: 2 }}>NIVEL DE RIESGO</div><div><Risk level={inv.risk_level} score={inv.risk_score} /></div></div>
       </div>
-      {inv.tipo_contable_razon && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #ddd6fe", fontSize: 11, color: "#475569", fontStyle: "italic" }}>
-          💡 {inv.tipo_contable_razon}
-        </div>
-      )}
+      {inv.tipo_contable_razon && (<div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #ddd6fe", fontSize: 11, color: "#475569", fontStyle: "italic" }}>💡 {inv.tipo_contable_razon}</div>)}
     </div>
   );
 }
@@ -579,40 +520,19 @@ function AiInsights({ inv }) {
 function DianStatus({ cufe, credentials }) {
   const [status, setStatus] = useState("idle");
   const [detail, setDetail] = useState("");
-
   useEffect(() => {
-    if (!credentials?.dianUrl) {
-      setStatus("no_creds");
-      return;
-    }
+    if (!credentials?.dianUrl) { setStatus("no_creds"); return; }
     if (!cufe) return;
-
     setStatus("checking");
-    fetch(CONFIG.DIAN_VALIDATE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cufe, dianUrl: credentials.dianUrl }),
-    })
+    fetch(CONFIG.DIAN_VALIDATE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cufe, dianUrl: credentials.dianUrl }) })
       .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
-      .then(data => {
-        setStatus(data.valid ? "valid" : "invalid");
-        setDetail(data.message || "");
-      })
-      .catch(() => {
-        setStatus("invalid");
-        setDetail("No se pudo validar");
-      });
+      .then(data => { setStatus(data.valid ? "valid" : "invalid"); setDetail(data.message || ""); })
+      .catch(() => { setStatus("invalid"); setDetail("No se pudo validar"); });
   }, [cufe, credentials?.dianUrl]);
 
-  if (status === "no_creds") {
-    return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef3c7", border: "1px solid #fbbf24", fontSize: 12, color: "#92400e" }}>⚠ Conecta el API DIAN para validación automática</div>;
-  }
-  if (status === "checking") {
-    return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#64748b" }}><span className="spin">⟳</span> Validando en DIAN...</div>;
-  }
-  if (status === "valid") {
-    return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#dcfce7", border: "1px solid #86efac", fontSize: 12, color: "#166534", fontWeight: 600 }}>✓ Validada por DIAN {detail && `· ${detail}`}</div>;
-  }
+  if (status === "no_creds") return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef3c7", border: "1px solid #fbbf24", fontSize: 12, color: "#92400e" }}>⚠ Conecta el API DIAN para validación automática</div>;
+  if (status === "checking") return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#64748b" }}><span className="spin">⟳</span> Validando en DIAN...</div>;
+  if (status === "valid") return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#dcfce7", border: "1px solid #86efac", fontSize: 12, color: "#166534", fontWeight: 600 }}>✓ Validada por DIAN {detail && `· ${detail}`}</div>;
   return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#991b1b" }}>✗ No validada {detail && `· ${detail}`}</div>;
 }
 
@@ -622,7 +542,6 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
   const [selected3, setSelected3] = useState("");
   const [notas, setNotas] = useState("");
   const [saving, setSaving] = useState(false);
-
   const retenciones = inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0;
   const hasErp = credentials?.erpKey && erpParams;
   const erpFields = erpParams?.fields || [];
@@ -637,8 +556,7 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
       const extras = { notas };
       erpFields.forEach((f, i) => { if (values[i]) extras[f.key] = values[i]; });
       await onCausar(inv, extras);
-    }
-    finally { setSaving(false); }
+    } finally { setSaving(false); }
   };
 
   return (
@@ -651,74 +569,45 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
         <Field label="MONEDA" value={inv.moneda || "COP"} />
         <Field label="EMISOR NIT" value={inv.emisor_nit} />
       </div>
-
       <Field label="CUFE" value={inv.cufe} mono />
-
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 6 }}>VALIDACIÓN DIAN</div>
         <DianStatus cufe={inv.cufe} credentials={credentials} />
       </div>
-
       <AiInsights inv={inv} />
-
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, border: "1px solid #e2e8f0" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.1em", marginBottom: 10 }}>DESGLOSE TRIBUTARIO</div>
           <TaxLine label="Subtotal" amount={inv.subtotal} />
           <TaxLine label="IVA" amount={inv.iva} percent={inv.iva_porcentaje} />
           {inv.inc > 0 && <TaxLine label="INC" amount={inv.inc} />}
-          <div style={{ borderTop: "2px solid #0f172a", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800 }}>
-            <span>TOTAL</span><span>{fmt(inv.total)}</span>
-          </div>
+          <div style={{ borderTop: "2px solid #0f172a", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800 }}><span>TOTAL</span><span>{fmt(inv.total)}</span></div>
           {retenciones && (
             <div style={{ marginTop: 10, padding: 10, background: "#fffbeb", borderRadius: 8, borderLeft: "3px solid #f59e0b" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#92400e", letterSpacing: "0.08em", marginBottom: 4 }}>RETENCIONES</div>
               <TaxLine label="ReteFuente" amount={inv.retefuente} percent={inv.retefuente_porcentaje} warn />
               <TaxLine label="ReteIVA" amount={inv.reteiva} percent={inv.reteiva_porcentaje} warn />
               <TaxLine label="ReteICA" amount={inv.reteica} percent={inv.reteica_porcentaje} warn />
-              <div style={{ borderTop: "2px solid #f59e0b", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800 }}>
-                <span>NETO A PAGAR</span><span>{fmt(inv.total_a_pagar || inv.total)}</span>
-              </div>
+              <div style={{ borderTop: "2px solid #f59e0b", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800 }}><span>NETO A PAGAR</span><span>{fmt(inv.total_a_pagar || inv.total)}</span></div>
             </div>
           )}
         </div>
-
         <div style={{ background: hasErp ? "#f0f9ff" : "#fef3c7", borderRadius: 10, padding: 14, border: `1px solid ${hasErp ? "#bae6fd" : "#fbbf24"}` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: hasErp ? "#0369a1" : "#92400e", letterSpacing: "0.1em" }}>DATOS DE CAUSACIÓN</div>
-          </div>
-
-          {erpLoading && (
-            <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#64748b", textAlign: "center" }}>
-              <span className="spin">⟳</span> Cargando parámetros del ERP...
-            </div>
-          )}
-
-          {!hasErp && !erpLoading && (
-            <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#92400e" }}>
-              ⚠ Conecta el API de tu software contable para ver las opciones de causación
-            </div>
-          )}
-
-          {hasErp && !erpLoading && erpFields.length === 0 && (
-            <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#64748b" }}>
-              No se encontraron parámetros en el ERP
-            </div>
-          )}
-
+          <div style={{ fontSize: 10, fontWeight: 700, color: hasErp ? "#0369a1" : "#92400e", letterSpacing: "0.1em", marginBottom: 10 }}>DATOS DE CAUSACIÓN</div>
+          {erpLoading && <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#64748b", textAlign: "center" }}><span className="spin">⟳</span> Cargando parámetros del ERP...</div>}
+          {!hasErp && !erpLoading && <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#92400e" }}>⚠ Conecta el API de tu software contable para ver las opciones de causación</div>}
+          {hasErp && !erpLoading && erpFields.length === 0 && <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#64748b" }}>No se encontraron parámetros en el ERP</div>}
           {hasErp && !erpLoading && erpFields.slice(0, 3).map((f, i) => (
             <div key={f.key} style={{ marginBottom: 10 }}>
               <SelectField label={f.label} value={values[i]} opts={f.options || []} onChange={setters[i]} required={f.required} />
             </div>
           ))}
-
           <div>
             <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>Notas adicionales</div>
             <textarea value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Observaciones..." rows={2} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }} />
           </div>
         </div>
       </div>
-
       <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <button onClick={handleCausar} disabled={!canCausar} style={{ padding: "10px 24px", borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: canCausar ? "pointer" : "not-allowed", background: canCausar ? "#0f172a" : "#94a3b8", color: "#fff", border: "none", opacity: canCausar ? 1 : 0.5 }}>
           {saving ? "Causando..." : "Causar factura"}
@@ -729,14 +618,15 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
   );
 }
 
-function StatCard({ label, value, color, icon }) {
+function StatCard({ label, value, color, icon, subtitle }) {
   return (
-    <div style={{ background: "#fff", borderRadius: 12, padding: "14px 16px", border: "1px solid #e2e8f0", flex: 1, minWidth: 140 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+    <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", border: "1px solid #e2e8f0", flex: 1, minWidth: 160 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
         <span style={{ fontSize: 16 }}>{icon}</span>
         <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em" }}>{label}</div>
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, color: color || "#0f172a" }}>{value}</div>
+      {subtitle && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>{subtitle}</div>}
     </div>
   );
 }
@@ -752,41 +642,273 @@ function EmptyState({ icon, title, message }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ASISTENTE (SIN CAMBIOS)
+// ⭐ COMPUTE dashboardStats — corazón del dashboard y del agente
+// ═══════════════════════════════════════════════════════════════
+function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
+  // facturas: array de invoices; causadasIds: Set<cufe>
+  const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
+  const isCausada = (f) => causadasIds.has(f.cufe) || f.estado === "CAUSADA";
+
+  const count = facturas.length;
+  const aprobadas = facturas.filter(isApproved);
+  const causadas = facturas.filter(isCausada);
+  const pendientes = aprobadas.filter(f => !isCausada(f));
+
+  const totalFacturado = facturas.reduce((s, f) => s + (Number(f.total) || 0), 0);
+  const totalNetoPagar = facturas.reduce((s, f) => s + (Number(f.total_a_pagar) || Number(f.total) || 0), 0);
+  const totalIva = facturas.reduce((s, f) => s + (Number(f.iva) || 0), 0);
+  const totalRetefuente = facturas.reduce((s, f) => s + (Number(f.retefuente) || 0), 0);
+  const totalReteiva = facturas.reduce((s, f) => s + (Number(f.reteiva) || 0), 0);
+  const totalReteica = facturas.reduce((s, f) => s + (Number(f.reteica) || 0), 0);
+  const totalRetenciones = totalRetefuente + totalReteiva + totalReteica;
+
+  // ── Top proveedores (por monto) ──
+  const bySupplier = {};
+  facturas.forEach(f => {
+    const key = f.emisor || "(sin emisor)";
+    if (!bySupplier[key]) bySupplier[key] = { emisor: key, emisor_nit: f.emisor_nit, total: 0, count: 0 };
+    bySupplier[key].total += Number(f.total) || 0;
+    bySupplier[key].count += 1;
+  });
+  const topProveedores = Object.values(bySupplier)
+    .sort((a, b) => b.total - a.total).slice(0, 10);
+
+  // ── Por categoría ──
+  const byCategoria = {};
+  facturas.forEach(f => {
+    const key = f.categoria || "Sin categorizar";
+    if (!byCategoria[key]) byCategoria[key] = { name: key, value: 0, count: 0 };
+    byCategoria[key].value += Number(f.total) || 0;
+    byCategoria[key].count += 1;
+  });
+  const categorias = Object.values(byCategoria).sort((a, b) => b.value - a.value);
+
+  // ── Por nivel de riesgo ──
+  const byRisk = { bajo: 0, medio: 0, alto: 0, "sin clasificar": 0 };
+  const byRiskAmount = { bajo: 0, medio: 0, alto: 0, "sin clasificar": 0 };
+  facturas.forEach(f => {
+    const k = (f.risk_level || "sin clasificar").toLowerCase();
+    if (byRisk[k] !== undefined) {
+      byRisk[k] += 1;
+      byRiskAmount[k] += Number(f.total) || 0;
+    } else {
+      byRisk["sin clasificar"] += 1;
+      byRiskAmount["sin clasificar"] += Number(f.total) || 0;
+    }
+  });
+  const riesgoData = [
+    { name: "Bajo", count: byRisk.bajo, monto: byRiskAmount.bajo, color: CHART_COLORS.risk_bajo },
+    { name: "Medio", count: byRisk.medio, monto: byRiskAmount.medio, color: CHART_COLORS.risk_medio },
+    { name: "Alto", count: byRisk.alto, monto: byRiskAmount.alto, color: CHART_COLORS.risk_alto },
+  ].filter(r => r.count > 0);
+
+  // ── Evolución temporal (por mes) ──
+  const byMonth = {};
+  facturas.forEach(f => {
+    const d = dateFromInv(f);
+    if (!d || isNaN(d.getTime())) return;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (!byMonth[key]) byMonth[key] = { key, label: monthLabel(d), timestamp: new Date(d.getFullYear(), d.getMonth(), 1).getTime(), aprobadas: 0, causadas: 0, monto: 0 };
+    if (isCausada(f)) byMonth[key].causadas += 1;
+    else if (isApproved(f)) byMonth[key].aprobadas += 1;
+    byMonth[key].monto += Number(f.total) || 0;
+  });
+  const evolucionMensual = Object.values(byMonth).sort((a, b) => a.timestamp - b.timestamp);
+
+  // ── Retenciones por mes (para grafica apilada) ──
+  const retencionesPorMes = {};
+  facturas.forEach(f => {
+    const d = dateFromInv(f);
+    if (!d || isNaN(d.getTime())) return;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (!retencionesPorMes[key]) retencionesPorMes[key] = { key, label: monthLabel(d), timestamp: new Date(d.getFullYear(), d.getMonth(), 1).getTime(), retefuente: 0, reteiva: 0, reteica: 0 };
+    retencionesPorMes[key].retefuente += Number(f.retefuente) || 0;
+    retencionesPorMes[key].reteiva += Number(f.reteiva) || 0;
+    retencionesPorMes[key].reteica += Number(f.reteica) || 0;
+  });
+  const retencionesData = Object.values(retencionesPorMes)
+    .filter(r => r.retefuente + r.reteiva + r.reteica > 0)
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  // ── Ticket promedio ──
+  const ticketPromedio = count > 0 ? totalFacturado / count : 0;
+
+  return {
+    count,
+    count_aprobadas: aprobadas.length,
+    count_pendientes: pendientes.length,
+    count_causadas: causadas.length,
+    totalFacturado,
+    totalNetoPagar,
+    totalIva,
+    totalRetefuente,
+    totalReteiva,
+    totalReteica,
+    totalRetenciones,
+    ticketPromedio,
+    topProveedores,
+    categorias,
+    riesgoData,
+    evolucionMensual,
+    retencionesData,
+    periodo: { desde: dateFrom || null, hasta: dateTo || null, filtro_activo: !!(dateFrom || dateTo) },
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ⭐ DASHBOARD TAB — gráficas interactivas
+// ═══════════════════════════════════════════════════════════════
+function ChartCard({ title, subtitle, children, height = 280 }) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", border: "1px solid #e2e8f0" }}>
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: "0.1em" }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{subtitle}</div>}
+      </div>
+      <div style={{ width: "100%", height }}>{children}</div>
+    </div>
+  );
+}
+
+function DashboardView({ stats, loading }) {
+  if (loading) {
+    return <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando datos...</div>;
+  }
+  if (stats.count === 0) {
+    return <EmptyState icon="📊" title="Sin datos para mostrar" message="No hay facturas en el período seleccionado. Ajusta los filtros o espera que lleguen facturas procesadas." />;
+  }
+
+  const periodoLabel = stats.periodo.filtro_activo
+    ? `${stats.periodo.desde ? dateStr(stats.periodo.desde) : "inicio"} — ${stats.periodo.hasta ? dateStr(stats.periodo.hasta) : "hoy"}`
+    : "Todas las facturas";
+
+  return (
+    <React.Fragment>
+      {/* Período activo */}
+      <div style={{ background: "#0f172a", color: "#e2e8f0", padding: "10px 16px", borderRadius: 10, marginBottom: 14, fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 14 }}>📅</span>
+        <span><strong>{periodoLabel}</strong> · {stats.count} {stats.count === 1 ? "factura" : "facturas"} en el análisis</span>
+      </div>
+
+      {/* KPIs */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
+        <StatCard icon="💰" label="TOTAL FACTURADO" value={fmtCompact(stats.totalFacturado)} subtitle={`${stats.count} facturas`} />
+        <StatCard icon="🎯" label="NETO A PAGAR" value={fmtCompact(stats.totalNetoPagar)} subtitle={`Retenciones: ${fmtCompact(stats.totalRetenciones)}`} />
+        <StatCard icon="⏳" label="PENDIENTES DE CAUSAR" value={stats.count_pendientes} color="#f59e0b" subtitle={`${stats.count_causadas} causadas`} />
+        <StatCard icon="📊" label="TICKET PROMEDIO" value={fmtCompact(stats.ticketPromedio)} subtitle="Por factura" />
+      </div>
+
+      {/* Fila 1: Evolución temporal + Top proveedores */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14, marginBottom: 14 }}>
+        <ChartCard title="📅 EVOLUCIÓN MENSUAL" subtitle="Facturas aprobadas vs causadas por mes">
+          {stats.evolucionMensual.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin datos de fechas</div>
+          ) : (
+            <ResponsiveContainer>
+              <BarChart data={stats.evolucionMensual} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
+                <YAxis tick={{ fontSize: 11, fill: "#64748b" }} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="aprobadas" stackId="a" fill={CHART_COLORS.aprobada} name="Aprobadas" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="causadas" stackId="a" fill={CHART_COLORS.causada} name="Causadas" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard title="🏢 TOP 10 PROVEEDORES" subtitle="Por monto total facturado">
+          {stats.topProveedores.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin proveedores</div>
+          ) : (
+            <ResponsiveContainer>
+              <BarChart data={stats.topProveedores} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 10, fill: "#64748b" }} tickFormatter={fmtCompact} />
+                <YAxis dataKey="emisor" type="category" tick={{ fontSize: 10, fill: "#64748b" }} width={120} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} formatter={(value) => fmt(value)} />
+                <Bar dataKey="total" fill={CHART_COLORS.primary} radius={[0, 4, 4, 0]} name="Monto" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </div>
+
+      {/* Fila 2: Categorías + Nivel de riesgo */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14, marginBottom: 14 }}>
+        <ChartCard title="🗂 DISTRIBUCIÓN POR CATEGORÍA" subtitle="Monto facturado por tipo de gasto">
+          {stats.categorias.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin categorías</div>
+          ) : (
+            <ResponsiveContainer>
+              <PieChart>
+                <Pie data={stats.categorias} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(entry) => `${entry.name}: ${fmtCompact(entry.value)}`} labelLine={false}>
+                  {stats.categorias.map((entry, i) => <Cell key={i} fill={CHART_COLORS.palette[i % CHART_COLORS.palette.length]} />)}
+                </Pie>
+                <Tooltip formatter={(value) => fmt(value)} contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard title="⚠ DISTRIBUCIÓN POR NIVEL DE RIESGO" subtitle="Cantidad de facturas según evaluación IA">
+          {stats.riesgoData.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin datos de riesgo</div>
+          ) : (
+            <ResponsiveContainer>
+              <PieChart>
+                <Pie data={stats.riesgoData} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} label={(entry) => `${entry.name}: ${entry.count}`} labelLine={false}>
+                  {stats.riesgoData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                </Pie>
+                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </div>
+
+      {/* Fila 3: Retenciones */}
+      <div style={{ marginBottom: 14 }}>
+        <ChartCard title="🏛 RETENCIONES POR MES" subtitle="ReteFuente + ReteIVA + ReteICA acumulados" height={260}>
+          {stats.retencionesData.length === 0 ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin retenciones aplicadas en el período</div>
+          ) : (
+            <ResponsiveContainer>
+              <BarChart data={stats.retencionesData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
+                <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={fmtCompact} />
+                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} formatter={(value) => fmt(value)} />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="retefuente" stackId="r" fill={CHART_COLORS.retefuente} name="ReteFuente" />
+                <Bar dataKey="reteiva" stackId="r" fill={CHART_COLORS.reteiva} name="ReteIVA" />
+                <Bar dataKey="reteica" stackId="r" fill={CHART_COLORS.reteica} name="ReteICA" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      </div>
+    </React.Fragment>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ASISTENTE (context incluye dashboardStats)
 // ═══════════════════════════════════════════════════════════════
 function getQuickPrompts(ctx) {
-  if (!ctx.session) {
-    return [
-      "¿Qué es este sistema y cómo funciona?",
-      "¿Cómo cambio mi contraseña?",
-      "¿Qué documentos procesa el asistente?",
-    ];
-  }
-  if (ctx.currentInvoice) {
-    return [
-      "¿Qué cuenta contable debería usar para esta factura?",
-      "Explícame las retenciones de esta factura",
-      "¿Es deducible este gasto?",
-    ];
-  }
-  return [
-    "¿Qué significa la cuenta 5110?",
-    "¿Cómo causo una factura de servicios?",
-    "Diferencia entre gasto y costo",
-    "¿Qué es el PUC?",
-  ];
+  if (!ctx.session) return ["¿Qué es este sistema y cómo funciona?", "¿Cómo cambio mi contraseña?", "¿Qué documentos procesa el asistente?"];
+  if (ctx.currentInvoice) return ["¿Qué cuenta contable debería usar para esta factura?", "Explícame las retenciones de esta factura", "¿Es deducible este gasto?"];
+  if (ctx.currentTab === "dashboard" && ctx.dashboardStats) return ["¿Cuál es mi proveedor más frecuente?", "Resúmeme el gasto del período", "¿Cuánto he retenido en total?"];
+  return ["¿Qué significa la cuenta 5110?", "¿Cómo causo una factura de servicios?", "Diferencia entre gasto y costo", "¿Qué es el PUC?"];
 }
 
 function AssistantMessage({ role, content }) {
   const isUser = role === "user";
   return (
     <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
-      <div style={{
-        maxWidth: "85%", padding: "10px 14px", borderRadius: 14,
-        background: isUser ? "#0f172a" : "#f1f5f9",
-        color: isUser ? "#fff" : "#0f172a",
-        fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
-      }}>
+      <div style={{ maxWidth: "85%", padding: "10px 14px", borderRadius: 14, background: isUser ? "#0f172a" : "#f1f5f9", color: isUser ? "#fff" : "#0f172a", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
         {content}
       </div>
     </div>
@@ -802,16 +924,19 @@ function AssistantChat({ open, onClose, context }) {
   useEffect(() => {
     if (!open) return;
     if (messages.length === 0) {
-      const greeting = context.session
-        ? `Hola 👋 Soy tu asistente contable. Puedo ayudarte con el PUC, clasificación de gastos en ${context.session.software_contable || "tu software contable"}, o cualquier duda del proceso.`
-        : "Hola 👋 Soy el asistente contable. Antes de iniciar sesión puedo responder dudas generales sobre el sistema o sobre contabilidad.";
+      let greeting;
+      if (!context.session) {
+        greeting = "Hola 👋 Soy el asistente contable. Antes de iniciar sesión puedo responder dudas generales sobre el sistema o sobre contabilidad.";
+      } else if (context.currentTab === "dashboard" && context.dashboardStats) {
+        greeting = `Hola 👋 Estoy viendo tus ${context.dashboardStats.count} facturas del período. Puedo ayudarte a interpretar las gráficas, calcular totales o identificar tendencias — siempre con datos verificables.`;
+      } else {
+        greeting = `Hola 👋 Soy tu asistente contable. Puedo ayudarte con el PUC, clasificación de gastos en ${context.session.software_contable || "tu software contable"}, o cualquier duda del proceso.`;
+      }
       setMessages([{ role: "assistant", content: greeting }]);
     }
   }, [open]);
 
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, sending]);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, sending]);
 
   const send = async (text) => {
     const userMsg = (text || input).trim();
@@ -834,6 +959,8 @@ function AssistantChat({ open, onClose, context }) {
             actividad: context.session?.actividad || null,
             erp_fields: context.erpParams?.fields || null,
             currentInvoice: context.currentInvoice || null,
+            currentTab: context.currentTab || null,
+            dashboardStats: context.dashboardStats || null,
           },
         }),
       });
@@ -852,18 +979,7 @@ function AssistantChat({ open, onClose, context }) {
   const quickPrompts = getQuickPrompts(context);
 
   return (
-    <div
-      className="fade-in"
-      style={{
-        position: "fixed", bottom: 90, right: 20,
-        width: 380, maxWidth: "calc(100vw - 40px)",
-        height: 560, maxHeight: "calc(100vh - 120px)",
-        background: "#fff", borderRadius: 16,
-        boxShadow: "0 25px 70px rgba(15, 23, 42, 0.35)",
-        display: "flex", flexDirection: "column",
-        zIndex: 99, border: "1px solid #e2e8f0", overflow: "hidden",
-      }}
-    >
+    <div className="fade-in" style={{ position: "fixed", bottom: 90, right: 20, width: 380, maxWidth: "calc(100vw - 40px)", height: 560, maxHeight: "calc(100vh - 120px)", background: "#fff", borderRadius: 16, boxShadow: "0 25px 70px rgba(15, 23, 42, 0.35)", display: "flex", flexDirection: "column", zIndex: 99, border: "1px solid #e2e8f0", overflow: "hidden" }}>
       <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "14px 16px", color: "#fff" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -872,56 +988,23 @@ function AssistantChat({ open, onClose, context }) {
           </div>
           <button onClick={onClose} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", width: 28, height: 28, borderRadius: 8, cursor: "pointer", fontSize: 14 }}>×</button>
         </div>
-        {context.currentInvoice && (
-          <div style={{ marginTop: 8, fontSize: 10, color: "#94a3b8" }}>
-            Contexto: Factura {context.currentInvoice.numero_factura} · {context.currentInvoice.emisor}
-          </div>
-        )}
+        {context.currentInvoice && <div style={{ marginTop: 8, fontSize: 10, color: "#94a3b8" }}>Contexto: Factura {context.currentInvoice.numero_factura}</div>}
+        {context.currentTab === "dashboard" && context.dashboardStats && <div style={{ marginTop: 8, fontSize: 10, color: "#a7f3d0" }}>📊 Con acceso a datos del dashboard ({context.dashboardStats.count} facturas)</div>}
       </div>
-
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 14, background: "#fafbfc" }}>
         {messages.map((m, i) => <AssistantMessage key={i} role={m.role} content={m.content} />)}
-        {sending && (
-          <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 10 }}>
-            <div style={{ padding: "10px 14px", borderRadius: 14, background: "#f1f5f9", fontSize: 13, color: "#64748b" }}>
-              <span className="spin">⟳</span> Pensando...
-            </div>
-          </div>
-        )}
+        {sending && <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 10 }}><div style={{ padding: "10px 14px", borderRadius: 14, background: "#f1f5f9", fontSize: 13, color: "#64748b" }}><span className="spin">⟳</span> Pensando...</div></div>}
       </div>
-
       {messages.length <= 2 && !sending && (
         <div style={{ padding: "8px 14px", borderTop: "1px solid #e2e8f0", background: "#fafbfc", display: "flex", flexWrap: "wrap", gap: 6 }}>
           {quickPrompts.map((p, i) => (
-            <button key={i} onClick={() => send(p)} style={{
-              padding: "5px 10px", borderRadius: 14,
-              border: "1px solid #cbd5e1", background: "#fff",
-              fontSize: 10, color: "#475569",
-              cursor: "pointer", fontFamily: "inherit",
-            }}>
-              {p}
-            </button>
+            <button key={i} onClick={() => send(p)} style={{ padding: "5px 10px", borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", fontSize: 10, color: "#475569", cursor: "pointer", fontFamily: "inherit" }}>{p}</button>
           ))}
         </div>
       )}
-
       <div style={{ padding: 12, borderTop: "1px solid #e2e8f0", background: "#fff", display: "flex", gap: 8 }}>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-          placeholder="Pregunta sobre contabilidad, PUC, cuentas..."
-          disabled={sending}
-          style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }}
-        />
-        <button
-          onClick={() => send()}
-          disabled={sending || !input.trim()}
-          style={{ padding: "0 16px", borderRadius: 10, border: "none", background: sending || !input.trim() ? "#cbd5e1" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: sending || !input.trim() ? "not-allowed" : "pointer" }}
-        >
-          ↑
-        </button>
+        <input type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }} placeholder="Pregunta sobre contabilidad, PUC, gráficas..." disabled={sending} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }} />
+        <button onClick={() => send()} disabled={sending || !input.trim()} style={{ padding: "0 16px", borderRadius: 10, border: "none", background: sending || !input.trim() ? "#cbd5e1" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: sending || !input.trim() ? "not-allowed" : "pointer" }}>↑</button>
       </div>
     </div>
   );
@@ -931,30 +1014,17 @@ function AssistantFAB({ context }) {
   const [open, setOpen] = useState(false);
   return (
     <React.Fragment>
-      <button
-        onClick={() => setOpen(!open)}
-        aria-label="Abrir asistente"
-        style={{
-          position: "fixed", bottom: 20, right: 20,
-          width: 56, height: 56, borderRadius: "50%",
-          border: "none",
-          background: open ? "#334155" : "linear-gradient(135deg, #0f172a, #1e293b)",
-          color: "#fff", fontSize: 22, cursor: "pointer",
-          boxShadow: "0 8px 24px rgba(15, 23, 42, 0.35)",
-          zIndex: 98, transition: "transform 0.15s, background 0.15s",
-        }}
+      <button onClick={() => setOpen(!open)} aria-label="Abrir asistente" style={{ position: "fixed", bottom: 20, right: 20, width: 56, height: 56, borderRadius: "50%", border: "none", background: open ? "#334155" : "linear-gradient(135deg, #0f172a, #1e293b)", color: "#fff", fontSize: 22, cursor: "pointer", boxShadow: "0 8px 24px rgba(15, 23, 42, 0.35)", zIndex: 98, transition: "transform 0.15s, background 0.15s" }}
         onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
         onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
-      >
-        {open ? "×" : "💬"}
-      </button>
+      >{open ? "×" : "💬"}</button>
       <AssistantChat open={open} onClose={() => setOpen(false)} context={context} />
     </React.Fragment>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════
-// DASHBOARD (con botón "🔒 Cambiar contraseña")
+// ⭐ DASHBOARD (con tabs + stats lifted up)
 // ═══════════════════════════════════════════════════════════════
 function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
   const [facturas, setFacturas] = useState([]);
@@ -967,15 +1037,13 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  const [credentials, setCredentials] = useState(
-    session.credentials && session.credentials.erpKey ? session.credentials : null
-  );
+  const [credentials, setCredentials] = useState(session.credentials && session.credentials.erpKey ? session.credentials : null);
   const [erpParams, setErpParams] = useState(null);
   const [erpLoading, setErpLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("facturas"); // "facturas" | "dashboard"
 
   const fetchFacturas = async () => {
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
       const url = `${CONFIG.FACTURAS_URL}?nit=${encodeURIComponent(session.nit)}`;
       const res = await fetch(url);
@@ -986,46 +1054,27 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
     } catch (e) {
       setError("No se pudieron cargar las facturas: " + e.message);
       setFacturas([]);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const fetchErpParams = async (creds) => {
-    if (!creds?.erpKey || !creds?.erpUrl) {
-      setErpParams(null);
-      return;
-    }
+    if (!creds?.erpKey || !creds?.erpUrl) { setErpParams(null); return; }
     setErpLoading(true);
     try {
       const res = await fetch(CONFIG.ERP_PARAMS_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          software: session.software_contable,
-          erpUrl: creds.erpUrl,
-          erpUser: creds.erpUser,
-          erpKey: creds.erpKey,
-          empresa_nit: session.nit,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ software: session.software_contable, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey, empresa_nit: session.nit }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setErpParams(data);
-    } catch (e) {
-      console.error("No se pudieron cargar los parámetros del ERP:", e);
-      setErpParams({ fields: [] });
-    } finally {
-      setErpLoading(false);
-    }
+    } catch (e) { console.error(e); setErpParams({ fields: [] }); }
+    finally { setErpLoading(false); }
   };
 
   useEffect(() => { fetchFacturas(); }, []);
   useEffect(() => { if (credentials) fetchErpParams(credentials); }, [credentials]);
-
-  useEffect(() => {
-    if (onContextChange) onContextChange({ erpParams });
-  }, [erpParams]);
+  useEffect(() => { if (onContextChange) onContextChange({ erpParams }); }, [erpParams]);
 
   useEffect(() => {
     if (!onContextChange) return;
@@ -1033,21 +1082,14 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
     onContextChange({ currentInvoice: current });
   }, [expanded, facturas]);
 
+  useEffect(() => {
+    if (onContextChange) onContextChange({ currentTab: activeTab });
+  }, [activeTab]);
+
   const handleCausar = async (inv, extras) => {
     try {
-      const payload = {
-        ...inv, ...extras,
-        usuario: session.correo || session.nit,
-        empresa_nit: session.nit,
-        software_contable: session.software_contable,
-        credentials: credentials,
-        causado_at: new Date().toISOString(),
-      };
-      const res = await fetch(CONFIG.CAUSAR_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const payload = { ...inv, ...extras, usuario: session.correo || session.nit, empresa_nit: session.nit, software_contable: session.software_contable, credentials, causado_at: new Date().toISOString() };
+      const res = await fetch(CONFIG.CAUSAR_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       const data = text ? JSON.parse(text) : { success: false, error: 'Respuesta vacía' };
@@ -1055,47 +1097,58 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
       setCausadas((p) => new Set([...p, inv.cufe]));
       alert(`✓ Factura ${inv.numero_factura} causada en ${session.software_contable}`);
       setExpanded(null);
-    } catch (e) {
-      alert("Error al causar: " + e.message);
-    }
+    } catch (e) { alert("Error al causar: " + e.message); }
   };
 
   const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
 
-  const filtered = useMemo(() => {
+  // Aplicar SIEMPRE filtro de fechas + búsqueda (para ambas tabs)
+  const dateFiltered = useMemo(() => {
     return facturas.filter((f) => {
-      const causada = causadas.has(f.cufe) || f.estado === "CAUSADA";
-      if (filter === "PENDIENTES" && (causada || !isApproved(f))) return false;
-      if (filter === "CAUSADAS" && !causada) return false;
-      if (search) {
-        const s = search.toLowerCase();
-        if (![f.numero_factura, f.emisor, f.emisor_nit, f.cufe].some((v) => (v || "").toLowerCase().includes(s))) return false;
-      }
       const fechaInv = dateFromInv(f);
-      if (dateFrom && fechaInv) {
-        if (fechaInv < new Date(dateFrom)) return false;
-      }
+      if (dateFrom && fechaInv) { if (fechaInv < new Date(dateFrom)) return false; }
       if (dateTo && fechaInv) {
         const hasta = new Date(dateTo);
         hasta.setHours(23, 59, 59);
         if (fechaInv > hasta) return false;
       }
+      if (search) {
+        const s = search.toLowerCase();
+        if (![f.numero_factura, f.emisor, f.emisor_nit, f.cufe].some((v) => (v || "").toLowerCase().includes(s))) return false;
+      }
       return true;
     });
-  }, [facturas, filter, search, dateFrom, dateTo, causadas]);
+  }, [facturas, dateFrom, dateTo, search]);
 
+  // Filtro adicional de la tab Facturas (pendientes/causadas/todas)
+  const filtered = useMemo(() => {
+    return dateFiltered.filter((f) => {
+      const causada = causadas.has(f.cufe) || f.estado === "CAUSADA";
+      if (filter === "PENDIENTES" && (causada || !isApproved(f))) return false;
+      if (filter === "CAUSADAS" && !causada) return false;
+      return true;
+    });
+  }, [dateFiltered, filter, causadas]);
+
+  // Stats para la tab Facturas
   const stats = useMemo(() => {
     const aprobadas = facturas.filter(isApproved);
     const pendientes = aprobadas.filter((f) => !causadas.has(f.cufe) && f.estado !== "CAUSADA");
     const causadasArr = facturas.filter((f) => f.estado === "CAUSADA" || causadas.has(f.cufe));
     const totalMonto = filtered.reduce((acc, f) => acc + (Number(f.total) || 0), 0);
-    return {
-      pendientes: pendientes.length,
-      causadas: causadasArr.length,
-      total: aprobadas.length,
-      totalMonto,
-    };
+    return { pendientes: pendientes.length, causadas: causadasArr.length, total: aprobadas.length, totalMonto };
   }, [facturas, filtered, causadas]);
+
+  // ⭐ Stats para DASHBOARD (incluye filtro de fechas + búsqueda, NO filtra por pendientes/causadas)
+  const dashboardStats = useMemo(
+    () => computeDashboardStats(dateFiltered, causadas, dateFrom, dateTo),
+    [dateFiltered, causadas, dateFrom, dateTo]
+  );
+
+  // Propagar dashboardStats al asistente
+  useEffect(() => {
+    if (onContextChange) onContextChange({ dashboardStats });
+  }, [dashboardStats]);
 
   const quickDate = (dias) => {
     const hasta = new Date();
@@ -1109,15 +1162,14 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
 
   return (
     <div style={{ minHeight: "100vh" }}>
+      {/* Header */}
       <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "18px 24px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
           <div>
             <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600, marginBottom: 4 }}>ASISTENTE OPUS 4.6</div>
             <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>Causación de Facturas</div>
             {session.empresa && session.empresa !== session.correo && (
-              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600, marginTop: 6 }}>
-                {session.empresa}
-              </div>
+              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600, marginTop: 6 }}>{session.empresa}</div>
             )}
             <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>NIT {session.nit} · {session.software_contable} · {session.correo}</div>
           </div>
@@ -1142,18 +1194,28 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
           </div>
         ) : (
           <React.Fragment>
-            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-              <StatCard icon="⏳" label="PENDIENTES" value={stats.pendientes} color="#10b981" />
-              <StatCard icon="✓" label="CAUSADAS" value={stats.causadas} color="#6366f1" />
-              <StatCard icon="📄" label="TOTAL APROBADAS" value={stats.total} />
-              <StatCard icon="💰" label="MONTO FILTRADO" value={fmt(stats.totalMonto)} />
+            {/* ⭐ TABS */}
+            <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "2px solid #e2e8f0", paddingBottom: 0 }}>
+              {[
+                { key: "facturas", label: "📋 Facturas" },
+                { key: "dashboard", label: "📊 Dashboard" },
+              ].map(t => (
+                <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+                  padding: "10px 20px", border: "none", background: "transparent",
+                  fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  color: activeTab === t.key ? "#0f172a" : "#94a3b8",
+                  borderBottom: `3px solid ${activeTab === t.key ? "#0f172a" : "transparent"}`,
+                  marginBottom: -2, fontFamily: "inherit", transition: "all 0.15s",
+                }}>{t.label}</button>
+              ))}
             </div>
 
             {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#991b1b" }}>{error}</div>}
 
+            {/* Filtros compartidos (fechas + búsqueda + refresh) */}
             <div style={{ background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e2e8f0", marginBottom: 12 }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                {[
+                {activeTab === "facturas" && [
                   { key: "PENDIENTES", label: `Pendientes (${stats.pendientes})` },
                   { key: "CAUSADAS", label: `Causadas (${stats.causadas})` },
                   { key: "ALL", label: `Todas (${stats.total})` },
@@ -1166,7 +1228,7 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
                   }}>{f.label}</button>
                 ))}
 
-                <div style={{ width: 1, height: 24, background: "#e2e8f0", margin: "0 4px" }}></div>
+                {activeTab === "facturas" && <div style={{ width: 1, height: 24, background: "#e2e8f0", margin: "0 4px" }} />}
 
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>📅 Desde:</span>
@@ -1178,12 +1240,16 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
                   )}
                 </div>
 
-                <input type="text" placeholder="Buscar factura, emisor, CUFE..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 240 }} />
-                <button onClick={fetchFacturas} disabled={loading} style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", background: "#fff", color: "#475569", border: "1px solid #e2e8f0" }}>
+                {activeTab === "facturas" && (
+                  <input type="text" placeholder="Buscar factura, emisor, CUFE..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 240 }} />
+                )}
+                {activeTab === "dashboard" && (
+                  <input type="text" placeholder="Filtrar por proveedor..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 240 }} />
+                )}
+                <button onClick={fetchFacturas} disabled={loading} title="Refrescar" style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", background: "#fff", color: "#475569", border: "1px solid #e2e8f0" }}>
                   {loading ? "⟳" : "↻"}
                 </button>
               </div>
-
               <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, alignSelf: "center" }}>ATAJOS:</span>
                 {[
@@ -1192,80 +1258,71 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
                   { d: 90, l: "Últimos 3 meses" },
                   { d: 365, l: "Último año" },
                 ].map(q => (
-                  <button key={q.d} onClick={() => quickDate(q.d)} style={{ padding: "4px 10px", borderRadius: 12, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
-                    {q.l}
-                  </button>
+                  <button key={q.d} onClick={() => quickDate(q.d)} style={{ padding: "4px 10px", borderRadius: 12, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, cursor: "pointer", color: "#475569" }}>{q.l}</button>
                 ))}
               </div>
             </div>
 
-            {loading ? (
-              <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando...</div>
-            ) : filtered.length === 0 ? (
-              <EmptyState icon="🔍" title="Sin resultados" message="No hay facturas que coincidan con los filtros aplicados. Ajusta los criterios o limpia los filtros." />
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {filtered.map((inv) => {
-                  const isCausada = causadas.has(inv.cufe) || inv.estado === "CAUSADA";
-                  const isExpanded = expanded === inv.cufe;
-                  const hasRet = (inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0);
-
-                  return (
-                    <div key={inv.cufe || inv.numero_factura} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${isExpanded ? "#3b82f6" : "#e2e8f0"}`, overflow: "hidden", transition: "all 0.15s" }}>
-                      <div onClick={() => setExpanded(isExpanded ? null : inv.cufe)} style={{ padding: "14px 20px", cursor: "pointer", display: "flex", alignItems: "center", gap: 14 }}>
-                        <div style={{ width: 36, height: 36, borderRadius: 8, background: isCausada ? "#dcfce7" : "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
-                          {isCausada ? "✓" : "📄"}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            <div style={{ fontSize: 14, fontWeight: 700 }}>{inv.numero_factura}</div>
-                            {inv.categoria && <span style={{ fontSize: 9, background: "#ede9fe", color: "#6d28d9", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>{inv.categoria}</span>}
+            {/* ⭐ Contenido según tab activa */}
+            {activeTab === "facturas" && (
+              <React.Fragment>
+                <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+                  <StatCard icon="⏳" label="PENDIENTES" value={stats.pendientes} color="#10b981" />
+                  <StatCard icon="✓" label="CAUSADAS" value={stats.causadas} color="#6366f1" />
+                  <StatCard icon="📄" label="TOTAL APROBADAS" value={stats.total} />
+                  <StatCard icon="💰" label="MONTO FILTRADO" value={fmt(stats.totalMonto)} />
+                </div>
+                {loading ? (
+                  <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando...</div>
+                ) : filtered.length === 0 ? (
+                  <EmptyState icon="🔍" title="Sin resultados" message="No hay facturas que coincidan con los filtros aplicados." />
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {filtered.map((inv) => {
+                      const isCausada = causadas.has(inv.cufe) || inv.estado === "CAUSADA";
+                      const isExpanded = expanded === inv.cufe;
+                      const hasRet = (inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0);
+                      return (
+                        <div key={inv.cufe || inv.numero_factura} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${isExpanded ? "#3b82f6" : "#e2e8f0"}`, overflow: "hidden", transition: "all 0.15s" }}>
+                          <div onClick={() => setExpanded(isExpanded ? null : inv.cufe)} style={{ padding: "14px 20px", cursor: "pointer", display: "flex", alignItems: "center", gap: 14 }}>
+                            <div style={{ width: 36, height: 36, borderRadius: 8, background: isCausada ? "#dcfce7" : "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{isCausada ? "✓" : "📄"}</div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <div style={{ fontSize: 14, fontWeight: 700 }}>{inv.numero_factura}</div>
+                                {inv.categoria && <span style={{ fontSize: 9, background: "#ede9fe", color: "#6d28d9", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>{inv.categoria}</span>}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {inv.emisor} · {dateStr(inv.fecha_aprobacion)}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: "right", minWidth: 110 }}>
+                              <div style={{ fontSize: 14, fontWeight: 700 }}>{fmt(inv.total)}</div>
+                              {hasRet && <div style={{ fontSize: 10, color: "#f59e0b" }}>con retenciones</div>}
+                            </div>
+                            <div style={{ minWidth: 90 }}><Risk level={inv.risk_level} score={inv.risk_score} /></div>
+                            <div style={{ minWidth: 110 }}><Badge status={isCausada ? "CAUSADA" : inv.estado} /></div>
+                            <div style={{ fontSize: 16, color: "#94a3b8", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</div>
                           </div>
-                          <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {inv.emisor} · {dateStr(inv.fecha_aprobacion)}
-                          </div>
+                          {isExpanded && !isCausada && <InvoiceDetail inv={inv} onCausar={handleCausar} credentials={credentials} erpParams={erpParams} erpLoading={erpLoading} />}
+                          {isExpanded && isCausada && <div style={{ background: "#f0fdf4", padding: 20, borderTop: "1px solid #dcfce7", textAlign: "center", color: "#166534", fontSize: 13 }}>✓ Esta factura ya fue causada</div>}
                         </div>
-                        <div style={{ textAlign: "right", minWidth: 110 }}>
-                          <div style={{ fontSize: 14, fontWeight: 700 }}>{fmt(inv.total)}</div>
-                          {hasRet && <div style={{ fontSize: 10, color: "#f59e0b" }}>con retenciones</div>}
-                        </div>
-                        <div style={{ minWidth: 90 }}><Risk level={inv.risk_level} score={inv.risk_score} /></div>
-                        <div style={{ minWidth: 110 }}><Badge status={isCausada ? "CAUSADA" : inv.estado} /></div>
-                        <div style={{ fontSize: 16, color: "#94a3b8", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</div>
-                      </div>
-                      {isExpanded && !isCausada && <InvoiceDetail inv={inv} onCausar={handleCausar} credentials={credentials} erpParams={erpParams} erpLoading={erpLoading} />}
-                      {isExpanded && isCausada && (
-                        <div style={{ background: "#f0fdf4", padding: 20, borderTop: "1px solid #dcfce7", textAlign: "center", color: "#166534", fontSize: 13 }}>
-                          ✓ Esta factura ya fue causada
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </React.Fragment>
             )}
+
+            {activeTab === "dashboard" && <DashboardView stats={dashboardStats} loading={loading} />}
           </React.Fragment>
         )}
       </div>
 
       {showSettings && (
-        <ApiSettingsModal
-          session={session}
-          credentials={credentials}
-          onClose={() => setShowSettings(false)}
+        <ApiSettingsModal session={session} credentials={credentials} onClose={() => setShowSettings(false)}
           onSave={async (creds) => {
             try {
-              const res = await fetch(CONFIG.SAVE_CREDENTIALS_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  nit: session.nit,
-                  dianUrl: creds.dianUrl,
-                  erpUrl: creds.erpUrl,
-                  erpUser: creds.erpUser,
-                  erpKey: creds.erpKey,
-                }),
-              });
+              const res = await fetch(CONFIG.SAVE_CREDENTIALS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nit: session.nit, dianUrl: creds.dianUrl, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey }) });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const text = await res.text();
               const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
@@ -1274,29 +1331,20 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
               setShowSettings(false);
               alert("✓ Credenciales guardadas. Cargando parámetros del ERP...");
             } catch (e) {
-              setCredentials(creds);
-              setShowSettings(false);
-              alert("⚠ Credenciales aplicadas localmente, pero no se pudieron guardar en el servidor: " + e.message + "\nTendrás que volver a ingresarlas la próxima vez.");
+              setCredentials(creds); setShowSettings(false);
+              alert("⚠ Credenciales aplicadas localmente: " + e.message);
             }
           }}
           onDelete={async () => {
             try {
-              const res = await fetch(CONFIG.DELETE_CREDENTIALS_URL, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ nit: session.nit }),
-              });
+              const res = await fetch(CONFIG.DELETE_CREDENTIALS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nit: session.nit }) });
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const text = await res.text();
               const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
               if (!data.success) throw new Error(data.error || "Error al olvidar credenciales");
-              setCredentials(null);
-              setErpParams(null);
-              setShowSettings(false);
-              alert("✓ Credenciales olvidadas. Conecta APIs nuevas cuando lo necesites.");
-            } catch (e) {
-              alert("⚠ No se pudieron olvidar las credenciales en el servidor: " + e.message);
-            }
+              setCredentials(null); setErpParams(null); setShowSettings(false);
+              alert("✓ Credenciales olvidadas.");
+            } catch (e) { alert("⚠ Error: " + e.message); }
           }}
         />
       )}
@@ -1305,7 +1353,7 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// APP (router de vistas: login → dashboard, forgot, reset, change)
+// APP (router)
 // ═══════════════════════════════════════════════════════════════
 function getInitialView() {
   const params = new URLSearchParams(window.location.search);
@@ -1321,14 +1369,9 @@ function App() {
     const params = new URLSearchParams(window.location.search);
     return params.get("reset_token") || null;
   });
+  const [assistantContext, setAssistantContext] = useState({ session: null, erpParams: null, currentInvoice: null, currentTab: null, dashboardStats: null });
 
-  const [assistantContext, setAssistantContext] = useState({
-    session: null, erpParams: null, currentInvoice: null,
-  });
-
-  useEffect(() => {
-    setAssistantContext((c) => ({ ...c, session }));
-  }, [session]);
+  useEffect(() => { setAssistantContext((c) => ({ ...c, session })); }, [session]);
 
   const clearResetTokenFromUrl = () => {
     const url = new URL(window.location.href);
@@ -1338,61 +1381,21 @@ function App() {
 
   let screen;
   if (view === "reset" && resetToken) {
-    screen = (
-      <ResetPasswordScreen
-        token={resetToken}
-        onSuccess={() => {
-          clearResetTokenFromUrl();
-          setResetToken(null);
-          setView("login");
-        }}
-      />
-    );
+    screen = <ResetPasswordScreen token={resetToken} onSuccess={() => { clearResetTokenFromUrl(); setResetToken(null); setView("login"); }} />;
   } else if (view === "forgot") {
     screen = <ForgotPasswordScreen onBack={() => setView("login")} />;
   } else if (view === "change_forced" && forcedChangeCtx) {
-    screen = (
-      <ChangePasswordScreen
-        mode="forced"
-        nit={forcedChangeCtx.nit}
-        changeToken={forcedChangeCtx.change_token}
-        onSuccess={() => {
-          setForcedChangeCtx(null);
-          setView("login");
-          alert("✓ Contraseña actualizada. Inicia sesión con tu nueva contraseña.");
-        }}
-        onCancel={() => {}}
-      />
-    );
+    screen = <ChangePasswordScreen mode="forced" nit={forcedChangeCtx.nit} changeToken={forcedChangeCtx.change_token}
+      onSuccess={() => { setForcedChangeCtx(null); setView("login"); alert("✓ Contraseña actualizada. Inicia sesión con tu nueva contraseña."); }}
+      onCancel={() => {}} />;
   } else if (view === "change_voluntary" && session) {
-    screen = (
-      <ChangePasswordScreen
-        mode="voluntary"
-        nit={session.nit}
-        onSuccess={() => {
-          setView("dashboard");
-          alert("✓ Contraseña actualizada correctamente.");
-        }}
-        onCancel={() => setView("dashboard")}
-      />
-    );
+    screen = <ChangePasswordScreen mode="voluntary" nit={session.nit}
+      onSuccess={() => { setView("dashboard"); alert("✓ Contraseña actualizada correctamente."); }}
+      onCancel={() => setView("dashboard")} />;
   } else if (view === "dashboard" && session) {
-    screen = (
-      <Dashboard
-        session={session}
-        onLogout={() => { setSession(null); setView("login"); }}
-        onChangePassword={() => setView("change_voluntary")}
-        onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))}
-      />
-    );
+    screen = <Dashboard session={session} onLogout={() => { setSession(null); setView("login"); }} onChangePassword={() => setView("change_voluntary")} onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))} />;
   } else {
-    screen = (
-      <LoginScreen
-        onLogin={(data) => { setSession(data); setView("dashboard"); }}
-        onForgotPassword={() => setView("forgot")}
-        onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }}
-      />
-    );
+    screen = <LoginScreen onLogin={(data) => { setSession(data); setView("dashboard"); }} onForgotPassword={() => setView("forgot")} onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }} />;
   }
 
   return (
