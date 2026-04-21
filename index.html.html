@@ -32,9 +32,11 @@ const CONFIG = {
   SAVE_CREDENTIALS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/save-credentials",
   DELETE_CREDENTIALS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/delete-credentials",
   ASSISTANT_URL: "https://conaiassist.app.n8n.cloud/webhook/api/assistant-chat",
+  CHANGE_PASSWORD_URL: "https://conaiassist.app.n8n.cloud/webhook/api/change-password",
+  REQUEST_RESET_URL: "https://conaiassist.app.n8n.cloud/webhook/api/request-password-reset",
+  RESET_PASSWORD_URL: "https://conaiassist.app.n8n.cloud/webhook/api/reset-password",
 };
 
-// Solo se guarda la URL sugerida del API por software, nada más
 const SOFTWARE_API_URLS = {
   Siigo: "https://api.siigo.com",
   Alegra: "https://api.alegra.com",
@@ -46,10 +48,29 @@ const SOFTWARE_API_URLS = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// LOGIN
+// AUTH LAYOUT (contenedor compartido para pantallas de auth)
 // ═══════════════════════════════════════════════════════════════
-function LoginScreen({ onLogin }) {
+function AuthLayout({ title, subtitle, children }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, padding: 32, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600, marginBottom: 6 }}>ASISTENTE OPUS 4.6</div>
+          <div style={{ fontSize: 24, fontWeight: 800 }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>{subtitle}</div>}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LOGIN (NIT + contraseña + link a olvidé mi contraseña)
+// ═══════════════════════════════════════════════════════════════
+function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
   const [nit, setNit] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -61,20 +82,27 @@ function LoginScreen({ onLogin }) {
       setError("Ingresa un NIT válido (mínimo 6 dígitos)");
       return;
     }
+    if (!password) {
+      setError("Ingresa tu contraseña");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(CONFIG.LOGIN_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nit: nitLimpio }),
+        body: JSON.stringify({ nit: nitLimpio, password }),
       });
       if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
-      // Safe parse: si el webhook responde body vacío (ej: NIT inexistente sin alwaysOutputData),
-      // lo tratamos como "empresa no encontrada" en vez de reventar con SyntaxError.
       const text = await res.text();
-      const data = text ? JSON.parse(text) : { valid: false, error: "Empresa no registrada. Verifica el NIT." };
+      const data = text ? JSON.parse(text) : { valid: false, error: "NIT o contraseña incorrectos" };
       if (!data.valid) {
-        setError(data.error || "Empresa no registrada. Verifica el NIT.");
+        setError(data.error || "NIT o contraseña incorrectos");
+        setLoading(false);
+        return;
+      }
+      if (data.requires_password_change) {
+        onRequirePasswordChange({ nit: nitLimpio, change_token: data.change_token });
         setLoading(false);
         return;
       }
@@ -86,32 +114,273 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, padding: 32, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600, marginBottom: 6 }}>ASISTENTE OPUS 4.6</div>
-          <div style={{ fontSize: 24, fontWeight: 800 }}>Causación de Facturas</div>
-          <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Inicia sesión con el NIT de tu empresa</div>
+    <AuthLayout title="Causación de Facturas" subtitle="Inicia sesión con el NIT de tu empresa">
+      <form onSubmit={handleSubmit}>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
+          <input type="text" value={nit} onChange={(e) => setNit(e.target.value)} placeholder="Ej: 800456789" autoFocus disabled={loading}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }} />
+          <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Solo números, sin dígito de verificación</div>
         </div>
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
-            <input type="text" value={nit} onChange={(e) => setNit(e.target.value)} placeholder="Ej: 800456789" autoFocus disabled={loading}
-              style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }} />
-            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Solo números, sin dígito de verificación</div>
-          </div>
-          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
-          <button type="submit" disabled={loading || !nit} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit ? "not-allowed" : "pointer", background: loading || !nit ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !nit ? 0.6 : 1 }}>
-            {loading ? <span><span className="spin">⟳</span> Verificando...</span> : "Ingresar"}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONTRASEÑA</label>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" disabled={loading}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", background: loading ? "#f8fafc" : "#fff" }} />
+        </div>
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+        <button type="submit" disabled={loading || !nit || !password} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit || !password ? "not-allowed" : "pointer", background: loading || !nit || !password ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !nit || !password ? 0.6 : 1 }}>
+          {loading ? <span><span className="spin">⟳</span> Verificando...</span> : "Ingresar"}
+        </button>
+        <div style={{ textAlign: "center", marginTop: 16 }}>
+          <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", color: "#0369a1", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>
+            ¿Olvidaste tu contraseña?
           </button>
-        </form>
-      </div>
-    </div>
+        </div>
+      </form>
+    </AuthLayout>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MODAL DE CONFIGURACIÓN DE APIs
+// FORGOT PASSWORD (NIT + correo → solicita email de reset)
+// ═══════════════════════════════════════════════════════════════
+function ForgotPasswordScreen({ onBack }) {
+  const [nit, setNit] = useState("");
+  const [correo, setCorreo] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    const nitLimpio = nit.replace(/\D/g, "");
+    if (!nitLimpio || nitLimpio.length < 6) {
+      setError("Ingresa un NIT válido");
+      return;
+    }
+    if (!correo || !correo.includes("@")) {
+      setError("Ingresa un correo válido");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(CONFIG.REQUEST_RESET_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nit: nitLimpio, correo: correo.trim() }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Por privacidad, la respuesta siempre es success=true aunque los datos no coincidan.
+      setSubmitted(true);
+    } catch (err) {
+      setError("No se pudo procesar la solicitud. Intenta de nuevo más tarde.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <AuthLayout title="Revisa tu correo" subtitle="Si los datos coinciden con una cuenta registrada, recibirás un email con instrucciones para restablecer tu contraseña.">
+        <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#166534", marginBottom: 16, textAlign: "center" }}>
+          ✓ Solicitud enviada
+        </div>
+        <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5, marginBottom: 16 }}>
+          El enlace expira en 30 minutos. Si no recibes el correo en pocos minutos, verifica la bandeja de spam o vuelve a intentarlo con los datos correctos.
+        </div>
+        <button onClick={onBack} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
+          Volver al inicio de sesión
+        </button>
+      </AuthLayout>
+    );
+  }
+
+  return (
+    <AuthLayout title="Restablecer contraseña" subtitle="Ingresa tu NIT y el correo de la empresa para recibir un enlace">
+      <form onSubmit={handleSubmit}>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
+          <input type="text" value={nit} onChange={(e) => setNit(e.target.value)} placeholder="Ej: 800456789" autoFocus disabled={loading}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CORREO REGISTRADO</label>
+          <input type="email" value={correo} onChange={(e) => setCorreo(e.target.value)} placeholder="empresa@correo.com" disabled={loading}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+          <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Debe ser el mismo correo con que se registró la empresa</div>
+        </div>
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+        <button type="submit" disabled={loading || !nit || !correo} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit || !correo ? "not-allowed" : "pointer", background: loading || !nit || !correo ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !nit || !correo ? 0.6 : 1, marginBottom: 10 }}>
+          {loading ? <span><span className="spin">⟳</span> Enviando...</span> : "Enviar enlace"}
+        </button>
+        <button type="button" onClick={onBack} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
+          Cancelar
+        </button>
+      </form>
+    </AuthLayout>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RESET PASSWORD (desde ?reset_token=XXX)
+// ═══════════════════════════════════════════════════════════════
+function ResetPasswordScreen({ token, onSuccess }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (newPassword.length < 8) { setError("La contraseña debe tener al menos 8 caracteres"); return; }
+    if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
+
+    setLoading(true);
+    try {
+      const res = await fetch(CONFIG.RESET_PASSWORD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, newPassword }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+      if (!data.success) {
+        setError(data.error || "No se pudo restablecer la contraseña");
+        setLoading(false);
+        return;
+      }
+      setSuccess(true);
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  if (success) {
+    return (
+      <AuthLayout title="¡Contraseña restablecida!" subtitle="Ya puedes iniciar sesión con tu nueva contraseña">
+        <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#166534", marginBottom: 16, textAlign: "center", fontWeight: 600 }}>
+          ✓ Tu contraseña ha sido actualizada
+        </div>
+        <button onClick={onSuccess} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+          Ir al inicio de sesión
+        </button>
+      </AuthLayout>
+    );
+  }
+
+  return (
+    <AuthLayout title="Nueva contraseña" subtitle="Ingresa tu nueva contraseña para completar el restablecimiento">
+      <form onSubmit={handleSubmit}>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NUEVA CONTRASEÑA</label>
+          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoFocus disabled={loading} placeholder="Mínimo 8 caracteres"
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONFIRMAR CONTRASEÑA</label>
+          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={loading} placeholder="Repite la contraseña"
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+        </div>
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+        <button type="submit" disabled={loading || !newPassword || !confirm} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !newPassword || !confirm ? "not-allowed" : "pointer", background: loading || !newPassword || !confirm ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !newPassword || !confirm ? 0.6 : 1 }}>
+          {loading ? <span><span className="spin">⟳</span> Guardando...</span> : "Restablecer contraseña"}
+        </button>
+      </form>
+    </AuthLayout>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CHANGE PASSWORD (forzado tras login temp, o voluntario desde dashboard)
+// ═══════════════════════════════════════════════════════════════
+function ChangePasswordScreen({ mode, nit, changeToken, onSuccess, onCancel }) {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const isForced = mode === "forced";
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (newPassword.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres"); return; }
+    if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
+    if (!isForced && !currentPassword) { setError("Ingresa tu contraseña actual"); return; }
+
+    setLoading(true);
+    try {
+      const payload = { nit, newPassword };
+      if (isForced) payload.change_token = changeToken;
+      else payload.currentPassword = currentPassword;
+
+      const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+      if (!data.success) {
+        setError(data.error || "No se pudo cambiar la contraseña");
+        setLoading(false);
+        return;
+      }
+      onSuccess();
+    } catch (err) {
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
+  const title = isForced ? "Cambia tu contraseña" : "Cambiar contraseña";
+  const subtitle = isForced
+    ? "Por seguridad, debes cambiar la contraseña temporal antes de continuar"
+    : "Ingresa tu contraseña actual y la nueva";
+
+  return (
+    <AuthLayout title={title} subtitle={subtitle}>
+      <form onSubmit={handleSubmit}>
+        {!isForced && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONTRASEÑA ACTUAL</label>
+            <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoFocus disabled={loading}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+          </div>
+        )}
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NUEVA CONTRASEÑA</label>
+          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoFocus={isForced} disabled={loading} placeholder="Mínimo 8 caracteres"
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+        </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONFIRMAR NUEVA CONTRASEÑA</label>
+          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={loading}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+        </div>
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+        <button type="submit" disabled={loading} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", background: loading ? "#94a3b8" : "#0f172a", color: "#fff", marginBottom: 10 }}>
+          {loading ? <span><span className="spin">⟳</span> Guardando...</span> : "Guardar nueva contraseña"}
+        </button>
+        {!isForced && (
+          <button type="button" onClick={onCancel} disabled={loading} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
+            Cancelar
+          </button>
+        )}
+      </form>
+    </AuthLayout>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODAL DE CONFIGURACIÓN DE APIs (SIN CAMBIOS)
 // ═══════════════════════════════════════════════════════════════
 function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [dianUrl, setDianUrl] = useState(credentials?.dianUrl || "");
@@ -134,7 +403,6 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
     setDeleting(false);
   };
 
-  // "Hace X tiempo" a partir del ISO de updatedAt
   const relativeTime = (iso) => {
     if (!iso) return null;
     const diff = Date.now() - new Date(iso).getTime();
@@ -230,9 +498,6 @@ function dateStr(d) {
   return dt.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// COMPONENTES
-// ═══════════════════════════════════════════════════════════════
 function Badge({ status }) {
   const S = {
     APROBADA: { bg: "#dcfce7", color: "#166534", label: "Aprobada" },
@@ -311,11 +576,8 @@ function AiInsights({ inv }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// VALIDACIÓN DIAN AUTOMÁTICA (invisible)
-// ═══════════════════════════════════════════════════════════════
 function DianStatus({ cufe, credentials }) {
-  const [status, setStatus] = useState("idle"); // idle, checking, valid, invalid, no_creds
+  const [status, setStatus] = useState("idle");
   const [detail, setDetail] = useState("");
 
   useEffect(() => {
@@ -343,50 +605,26 @@ function DianStatus({ cufe, credentials }) {
   }, [cufe, credentials?.dianUrl]);
 
   if (status === "no_creds") {
-    return (
-      <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef3c7", border: "1px solid #fbbf24", fontSize: 12, color: "#92400e" }}>
-        ⚠ Conecta el API DIAN para validación automática
-      </div>
-    );
+    return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef3c7", border: "1px solid #fbbf24", fontSize: 12, color: "#92400e" }}>⚠ Conecta el API DIAN para validación automática</div>;
   }
-
   if (status === "checking") {
-    return (
-      <div style={{ padding: "8px 14px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#64748b" }}>
-        <span className="spin">⟳</span> Validando en DIAN...
-      </div>
-    );
+    return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#64748b" }}><span className="spin">⟳</span> Validando en DIAN...</div>;
   }
-
   if (status === "valid") {
-    return (
-      <div style={{ padding: "8px 14px", borderRadius: 8, background: "#dcfce7", border: "1px solid #86efac", fontSize: 12, color: "#166534", fontWeight: 600 }}>
-        ✓ Validada por DIAN {detail && `· ${detail}`}
-      </div>
-    );
+    return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#dcfce7", border: "1px solid #86efac", fontSize: 12, color: "#166534", fontWeight: 600 }}>✓ Validada por DIAN {detail && `· ${detail}`}</div>;
   }
-
-  return (
-    <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#991b1b" }}>
-      ✗ No validada {detail && `· ${detail}`}
-    </div>
-  );
+  return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#991b1b" }}>✗ No validada {detail && `· ${detail}`}</div>;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// DETALLE DE FACTURA
-// ═══════════════════════════════════════════════════════════════
 function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
   const [selected1, setSelected1] = useState("");
   const [selected2, setSelected2] = useState("");
   const [selected3, setSelected3] = useState("");
   const [notas, setNotas] = useState("");
   const [saving, setSaving] = useState(false);
-  
+
   const retenciones = inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0;
   const hasErp = credentials?.erpKey && erpParams;
-  
-  // Campos dinámicos del ERP
   const erpFields = erpParams?.fields || [];
   const values = [selected1, selected2, selected3];
   const setters = [setSelected1, setSelected2, setSelected3];
@@ -397,9 +635,7 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
     setSaving(true);
     try {
       const extras = { notas };
-      erpFields.forEach((f, i) => {
-        if (values[i]) extras[f.key] = values[i];
-      });
+      erpFields.forEach((f, i) => { if (values[i]) extras[f.key] = values[i]; });
       await onCausar(inv, extras);
     }
     finally { setSaving(false); }
@@ -418,7 +654,6 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
 
       <Field label="CUFE" value={inv.cufe} mono />
 
-      {/* Validación DIAN automática */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 6 }}>VALIDACIÓN DIAN</div>
         <DianStatus cufe={inv.cufe} credentials={credentials} />
@@ -452,13 +687,13 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: hasErp ? "#0369a1" : "#92400e", letterSpacing: "0.1em" }}>DATOS DE CAUSACIÓN</div>
           </div>
-          
+
           {erpLoading && (
             <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#64748b", textAlign: "center" }}>
               <span className="spin">⟳</span> Cargando parámetros del ERP...
             </div>
           )}
-          
+
           {!hasErp && !erpLoading && (
             <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#92400e" }}>
               ⚠ Conecta el API de tu software contable para ver las opciones de causación
@@ -506,9 +741,6 @@ function StatCard({ label, value, color, icon }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// EMPTY STATES
-// ═══════════════════════════════════════════════════════════════
 function EmptyState({ icon, title, message }) {
   return (
     <div style={{ textAlign: "center", padding: "80px 20px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
@@ -520,7 +752,7 @@ function EmptyState({ icon, title, message }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ASISTENTE DE AYUDA CONTABLE (FAB + Chat)
+// ASISTENTE (SIN CAMBIOS)
 // ═══════════════════════════════════════════════════════════════
 function getQuickPrompts(ctx) {
   if (!ctx.session) {
@@ -550,15 +782,10 @@ function AssistantMessage({ role, content }) {
   return (
     <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
       <div style={{
-        maxWidth: "85%",
-        padding: "10px 14px",
-        borderRadius: 14,
+        maxWidth: "85%", padding: "10px 14px", borderRadius: 14,
         background: isUser ? "#0f172a" : "#f1f5f9",
         color: isUser ? "#fff" : "#0f172a",
-        fontSize: 13,
-        lineHeight: 1.5,
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
+        fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word",
       }}>
         {content}
       </div>
@@ -572,7 +799,6 @@ function AssistantChat({ open, onClose, context }) {
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
 
-  // Mensaje inicial según contexto
   useEffect(() => {
     if (!open) return;
     if (messages.length === 0) {
@@ -583,11 +809,8 @@ function AssistantChat({ open, onClose, context }) {
     }
   }, [open]);
 
-  // Auto-scroll al último mensaje
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, sending]);
 
   const send = async (text) => {
@@ -626,31 +849,21 @@ function AssistantChat({ open, onClose, context }) {
   };
 
   if (!open) return null;
-
   const quickPrompts = getQuickPrompts(context);
 
   return (
     <div
       className="fade-in"
       style={{
-        position: "fixed",
-        bottom: 90,
-        right: 20,
-        width: 380,
-        maxWidth: "calc(100vw - 40px)",
-        height: 560,
-        maxHeight: "calc(100vh - 120px)",
-        background: "#fff",
-        borderRadius: 16,
+        position: "fixed", bottom: 90, right: 20,
+        width: 380, maxWidth: "calc(100vw - 40px)",
+        height: 560, maxHeight: "calc(100vh - 120px)",
+        background: "#fff", borderRadius: 16,
         boxShadow: "0 25px 70px rgba(15, 23, 42, 0.35)",
-        display: "flex",
-        flexDirection: "column",
-        zIndex: 99,
-        border: "1px solid #e2e8f0",
-        overflow: "hidden",
+        display: "flex", flexDirection: "column",
+        zIndex: 99, border: "1px solid #e2e8f0", overflow: "hidden",
       }}
     >
-      {/* Header */}
       <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "14px 16px", color: "#fff" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -666,7 +879,6 @@ function AssistantChat({ open, onClose, context }) {
         )}
       </div>
 
-      {/* Mensajes */}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 14, background: "#fafbfc" }}>
         {messages.map((m, i) => <AssistantMessage key={i} role={m.role} content={m.content} />)}
         {sending && (
@@ -678,19 +890,14 @@ function AssistantChat({ open, onClose, context }) {
         )}
       </div>
 
-      {/* Sugerencias rápidas (solo cuando no hay muchos mensajes) */}
       {messages.length <= 2 && !sending && (
         <div style={{ padding: "8px 14px", borderTop: "1px solid #e2e8f0", background: "#fafbfc", display: "flex", flexWrap: "wrap", gap: 6 }}>
           {quickPrompts.map((p, i) => (
             <button key={i} onClick={() => send(p)} style={{
-              padding: "5px 10px",
-              borderRadius: 14,
-              border: "1px solid #cbd5e1",
-              background: "#fff",
-              fontSize: 10,
-              color: "#475569",
-              cursor: "pointer",
-              fontFamily: "inherit",
+              padding: "5px 10px", borderRadius: 14,
+              border: "1px solid #cbd5e1", background: "#fff",
+              fontSize: 10, color: "#475569",
+              cursor: "pointer", fontFamily: "inherit",
             }}>
               {p}
             </button>
@@ -698,7 +905,6 @@ function AssistantChat({ open, onClose, context }) {
         </div>
       )}
 
-      {/* Input */}
       <div style={{ padding: 12, borderTop: "1px solid #e2e8f0", background: "#fff", display: "flex", gap: 8 }}>
         <input
           type="text"
@@ -729,20 +935,13 @@ function AssistantFAB({ context }) {
         onClick={() => setOpen(!open)}
         aria-label="Abrir asistente"
         style={{
-          position: "fixed",
-          bottom: 20,
-          right: 20,
-          width: 56,
-          height: 56,
-          borderRadius: "50%",
+          position: "fixed", bottom: 20, right: 20,
+          width: 56, height: 56, borderRadius: "50%",
           border: "none",
           background: open ? "#334155" : "linear-gradient(135deg, #0f172a, #1e293b)",
-          color: "#fff",
-          fontSize: 22,
-          cursor: "pointer",
+          color: "#fff", fontSize: 22, cursor: "pointer",
           boxShadow: "0 8px 24px rgba(15, 23, 42, 0.35)",
-          zIndex: 98,
-          transition: "transform 0.15s, background 0.15s",
+          zIndex: 98, transition: "transform 0.15s, background 0.15s",
         }}
         onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
         onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
@@ -755,9 +954,9 @@ function AssistantFAB({ context }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// DASHBOARD
+// DASHBOARD (con botón "🔒 Cambiar contraseña")
 // ═══════════════════════════════════════════════════════════════
-function Dashboard({ session, onLogout, onContextChange }) {
+function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
   const [facturas, setFacturas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -768,8 +967,6 @@ function Dashboard({ session, onLogout, onContextChange }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showSettings, setShowSettings] = useState(false);
-  // Credenciales: inicializar desde session si el login las trajo guardadas,
-  // si no null (usuario tendrá que conectar manualmente)
   const [credentials, setCredentials] = useState(
     session.credentials && session.credentials.erpKey ? session.credentials : null
   );
@@ -783,7 +980,6 @@ function Dashboard({ session, onLogout, onContextChange }) {
       const url = `${CONFIG.FACTURAS_URL}?nit=${encodeURIComponent(session.nit)}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Safe parse: webhook puede devolver body vacío cuando no hay facturas.
       const text = await res.text();
       const data = text ? JSON.parse(text) : [];
       setFacturas(Array.isArray(data) ? data : (data ? [data] : []));
@@ -827,7 +1023,6 @@ function Dashboard({ session, onLogout, onContextChange }) {
   useEffect(() => { fetchFacturas(); }, []);
   useEffect(() => { if (credentials) fetchErpParams(credentials); }, [credentials]);
 
-  // ⬇️ Reportar cambios de contexto al App (para el asistente)
   useEffect(() => {
     if (onContextChange) onContextChange({ erpParams });
   }, [erpParams]);
@@ -910,7 +1105,6 @@ function Dashboard({ session, onLogout, onContextChange }) {
     setDateTo(hasta.toISOString().slice(0, 10));
   };
 
-  // Si no hay facturas para esta empresa
   const noFacturasForEmpresa = !loading && !error && facturas.length === 0;
 
   return (
@@ -927,9 +1121,12 @@ function Dashboard({ session, onLogout, onContextChange }) {
             )}
             <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>NIT {session.nit} · {session.software_contable} · {session.correo}</div>
           </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button onClick={() => setShowSettings(true)} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: credentials ? "#10b981" : "transparent", color: credentials ? "#fff" : "#94a3b8", border: `1px solid ${credentials ? "#10b981" : "#334155"}` }}>
               {credentials ? "✓ APIs conectadas" : "⚙ Conectar APIs"}
+            </button>
+            <button onClick={onChangePassword} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
+              🔒 Cambiar contraseña
             </button>
             <button onClick={onLogout} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
               Cerrar sesión
@@ -941,11 +1138,7 @@ function Dashboard({ session, onLogout, onContextChange }) {
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 24px" }}>
         {noFacturasForEmpresa ? (
           <div style={{ marginTop: 40 }}>
-            <EmptyState 
-              icon="📄" 
-              title="No se han procesado facturas" 
-              message="Cuando lleguen facturas electrónicas aprobadas a tu correo, aparecerán aquí para causarlas en tu software contable." 
-            />
+            <EmptyState icon="📄" title="No se han procesado facturas" message="Cuando lleguen facturas electrónicas aprobadas a tu correo, aparecerán aquí para causarlas en tu software contable." />
           </div>
         ) : (
           <React.Fragment>
@@ -1009,11 +1202,7 @@ function Dashboard({ session, onLogout, onContextChange }) {
             {loading ? (
               <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando...</div>
             ) : filtered.length === 0 ? (
-              <EmptyState 
-                icon="🔍" 
-                title="Sin resultados" 
-                message="No hay facturas que coincidan con los filtros aplicados. Ajusta los criterios o limpia los filtros." 
-              />
+              <EmptyState icon="🔍" title="Sin resultados" message="No hay facturas que coincidan con los filtros aplicados. Ajusta los criterios o limpia los filtros." />
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {filtered.map((inv) => {
@@ -1065,8 +1254,6 @@ function Dashboard({ session, onLogout, onContextChange }) {
           credentials={credentials}
           onClose={() => setShowSettings(false)}
           onSave={async (creds) => {
-            // Guardar credenciales en el backend (encriptadas) + en estado local.
-            // Si el backend falla, no perdemos la sesión: solo alertamos.
             try {
               const res = await fetch(CONFIG.SAVE_CREDENTIALS_URL, {
                 method: "POST",
@@ -1083,13 +1270,10 @@ function Dashboard({ session, onLogout, onContextChange }) {
               const text = await res.text();
               const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
               if (!data.success) throw new Error(data.error || "Error al guardar");
-
-              // Al guardar ok, actualizar updatedAt local al momento actual para feedback inmediato
               setCredentials({ ...creds, updatedAt: data.updated_at || new Date().toISOString() });
               setShowSettings(false);
               alert("✓ Credenciales guardadas. Cargando parámetros del ERP...");
             } catch (e) {
-              // Mantiene credenciales en local aunque el backend falle, para no bloquear la sesión.
               setCredentials(creds);
               setShowSettings(false);
               alert("⚠ Credenciales aplicadas localmente, pero no se pudieron guardar en el servidor: " + e.message + "\nTendrás que volver a ingresarlas la próxima vez.");
@@ -1106,7 +1290,6 @@ function Dashboard({ session, onLogout, onContextChange }) {
               const text = await res.text();
               const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
               if (!data.success) throw new Error(data.error || "Error al olvidar credenciales");
-
               setCredentials(null);
               setErpParams(null);
               setShowSettings(false);
@@ -1121,31 +1304,100 @@ function Dashboard({ session, onLogout, onContextChange }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// APP (router de vistas: login → dashboard, forgot, reset, change)
+// ═══════════════════════════════════════════════════════════════
+function getInitialView() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("reset_token")) return "reset";
+  return "login";
+}
+
 function App() {
+  const [view, setView] = useState(getInitialView);
   const [session, setSession] = useState(null);
-  // Contexto compartido para el asistente (cambia cuando entra sesión, se carga ERP o se expande una factura)
-  const [assistantContext, setAssistantContext] = useState({
-    session: null,
-    erpParams: null,
-    currentInvoice: null,
+  const [forcedChangeCtx, setForcedChangeCtx] = useState(null);
+  const [resetToken, setResetToken] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("reset_token") || null;
   });
 
-  // Mantener el contexto sincronizado con la sesión
+  const [assistantContext, setAssistantContext] = useState({
+    session: null, erpParams: null, currentInvoice: null,
+  });
+
   useEffect(() => {
     setAssistantContext((c) => ({ ...c, session }));
   }, [session]);
 
+  const clearResetTokenFromUrl = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("reset_token");
+    window.history.replaceState({}, "", url.toString());
+  };
+
+  let screen;
+  if (view === "reset" && resetToken) {
+    screen = (
+      <ResetPasswordScreen
+        token={resetToken}
+        onSuccess={() => {
+          clearResetTokenFromUrl();
+          setResetToken(null);
+          setView("login");
+        }}
+      />
+    );
+  } else if (view === "forgot") {
+    screen = <ForgotPasswordScreen onBack={() => setView("login")} />;
+  } else if (view === "change_forced" && forcedChangeCtx) {
+    screen = (
+      <ChangePasswordScreen
+        mode="forced"
+        nit={forcedChangeCtx.nit}
+        changeToken={forcedChangeCtx.change_token}
+        onSuccess={() => {
+          setForcedChangeCtx(null);
+          setView("login");
+          alert("✓ Contraseña actualizada. Inicia sesión con tu nueva contraseña.");
+        }}
+        onCancel={() => {}}
+      />
+    );
+  } else if (view === "change_voluntary" && session) {
+    screen = (
+      <ChangePasswordScreen
+        mode="voluntary"
+        nit={session.nit}
+        onSuccess={() => {
+          setView("dashboard");
+          alert("✓ Contraseña actualizada correctamente.");
+        }}
+        onCancel={() => setView("dashboard")}
+      />
+    );
+  } else if (view === "dashboard" && session) {
+    screen = (
+      <Dashboard
+        session={session}
+        onLogout={() => { setSession(null); setView("login"); }}
+        onChangePassword={() => setView("change_voluntary")}
+        onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))}
+      />
+    );
+  } else {
+    screen = (
+      <LoginScreen
+        onLogin={(data) => { setSession(data); setView("dashboard"); }}
+        onForgotPassword={() => setView("forgot")}
+        onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }}
+      />
+    );
+  }
+
   return (
     <React.Fragment>
-      {!session ? (
-        <LoginScreen onLogin={setSession} />
-      ) : (
-        <Dashboard
-          session={session}
-          onLogout={() => setSession(null)}
-          onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))}
-        />
-      )}
+      {screen}
       <AssistantFAB context={assistantContext} />
     </React.Fragment>
   );
