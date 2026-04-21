@@ -900,7 +900,7 @@ function DashboardView({ stats, loading }) {
 function getQuickPrompts(ctx) {
   if (!ctx.session) return ["¿Qué es este sistema y cómo funciona?", "¿Cómo cambio mi contraseña?", "¿Qué documentos procesa el asistente?"];
   if (ctx.currentInvoice) return ["¿Qué cuenta contable debería usar para esta factura?", "Explícame las retenciones de esta factura", "¿Es deducible este gasto?"];
-  if (ctx.currentTab === "dashboard" && ctx.dashboardStats) return ["¿Cuál es mi proveedor más frecuente?", "Resúmeme el gasto del período", "¿Cuánto he retenido en total?"];
+  if (ctx.dashboardStats && ctx.dashboardStats.count > 0) return ["¿Cuál es mi proveedor más frecuente?", "Resúmeme el gasto del período", "¿Cuánto he retenido en total?"];
   return ["¿Qué significa la cuenta 5110?", "¿Cómo causo una factura de servicios?", "Diferencia entre gasto y costo", "¿Qué es el PUC?"];
 }
 
@@ -927,8 +927,8 @@ function AssistantChat({ open, onClose, context }) {
       let greeting;
       if (!context.session) {
         greeting = "Hola 👋 Soy el asistente contable. Antes de iniciar sesión puedo responder dudas generales sobre el sistema o sobre contabilidad.";
-      } else if (context.currentTab === "dashboard" && context.dashboardStats) {
-        greeting = `Hola 👋 Estoy viendo tus ${context.dashboardStats.count} facturas del período. Puedo ayudarte a interpretar las gráficas, calcular totales o identificar tendencias — siempre con datos verificables.`;
+      } else if (context.dashboardStats && context.dashboardStats.count > 0) {
+        greeting = `Hola 👋 Estoy viendo tus ${context.dashboardStats.count} facturas del período. Puedo ayudarte con el PUC, causación, o responder preguntas sobre tus datos — siempre con cifras verificables.`;
       } else {
         greeting = `Hola 👋 Soy tu asistente contable. Puedo ayudarte con el PUC, clasificación de gastos en ${context.session.software_contable || "tu software contable"}, o cualquier duda del proceso.`;
       }
@@ -989,7 +989,7 @@ function AssistantChat({ open, onClose, context }) {
           <button onClick={onClose} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", width: 28, height: 28, borderRadius: 8, cursor: "pointer", fontSize: 14 }}>×</button>
         </div>
         {context.currentInvoice && <div style={{ marginTop: 8, fontSize: 10, color: "#94a3b8" }}>Contexto: Factura {context.currentInvoice.numero_factura}</div>}
-        {context.currentTab === "dashboard" && context.dashboardStats && <div style={{ marginTop: 8, fontSize: 10, color: "#a7f3d0" }}>📊 Con acceso a datos del dashboard ({context.dashboardStats.count} facturas)</div>}
+        {context.dashboardStats && context.dashboardStats.count > 0 && <div style={{ marginTop: 8, fontSize: 10, color: "#a7f3d0" }}>📊 Con acceso a datos del dashboard ({context.dashboardStats.count} facturas)</div>}
       </div>
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 14, background: "#fafbfc" }}>
         {messages.map((m, i) => <AssistantMessage key={i} role={m.role} content={m.content} />)}
