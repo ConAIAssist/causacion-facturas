@@ -363,6 +363,7 @@ function ResetPasswordScreen({ token, onSuccess }) {
 }
 
 // ⭐ ChangePasswordScreen modificado: incluye modo "sub_user" que requiere aprobación
+// ⭐ Ahora recibe 'session' en modo sub_user para incluir JWT Authorization header
 function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCancel }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -383,8 +384,14 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
     setLoading(true);
     try {
       if (isSubUser) {
+        // ⭐ Endpoint protegido: incluye Authorization header con JWT
+        const headers = { "Content-Type": "application/json" };
+        if (session?.access_token) {
+          headers["Authorization"] = `Bearer ${session.access_token}`;
+        }
         const res = await fetch(CONFIG.SUB_USER_REQUEST_PW_URL, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers,
           body: JSON.stringify({
             nit: session.nit,
             user_id: session.user_id,
@@ -392,9 +399,21 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
             newPassword,
           }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // Si el servidor rechaza el JWT (401 o body vacío = bloqueo/expiración)
+        if (res.status === 401) {
+          setError("Tu sesión expiró. Inicia sesión de nuevo.");
+          setLoading(false);
+          setTimeout(() => onCancel(), 1500);
+          return;
+        }
         const text = await res.text();
-        const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+        if (!text) {
+          setError("Sesión inválida. Inicia sesión de nuevo.");
+          setLoading(false);
+          setTimeout(() => onCancel(), 1500);
+          return;
+        }
+        const data = JSON.parse(text);
         if (!data.success) { setError(data.error || "No se pudo enviar la solicitud"); setLoading(false); return; }
         setSubmittedPending(true);
       } else {
@@ -481,8 +500,9 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
 
 // ═══════════════════════════════════════════════════════════════
 // ⭐ MODAL DE GESTIÓN DE SUB-USUARIOS (solo master)
+// Ahora recibe authFetch para usar JWT
 // ═══════════════════════════════════════════════════════════════
-function SubUsersModal({ session, onClose }) {
+function SubUsersModal({ session, onClose, authFetch }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -498,15 +518,14 @@ function SubUsersModal({ session, onClose }) {
   const fetchUsers = async () => {
     setLoading(true); setError("");
     try {
-      const res = await fetch(CONFIG.SUB_USERS_LIST_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const { data } = await authFetch(CONFIG.SUB_USERS_LIST_URL, {
+        method: "POST",
         body: JSON.stringify({ nit: session.nit }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : { success: false, users: [] };
       setUsers(data.users || []);
-    } catch (e) { setError("No se pudieron cargar los usuarios: " + e.message); }
+    } catch (e) {
+      if (e.message !== 'SESSION_EXPIRED') setError("No se pudieron cargar los usuarios: " + e.message);
+    }
     finally { setLoading(false); }
   };
 
@@ -520,8 +539,8 @@ function SubUsersModal({ session, onClose }) {
     if (!newEmail.includes("@")) { setCreateError("Email inválido"); return; }
     setCreating(true);
     try {
-      const res = await fetch(CONFIG.SUB_USERS_CREATE_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      const { data } = await authFetch(CONFIG.SUB_USERS_CREATE_URL, {
+        method: "POST",
         body: JSON.stringify({
           nit: session.nit,
           nombre: newNombre.trim(),
@@ -529,14 +548,13 @@ function SubUsersModal({ session, onClose }) {
           password: newPassword,
         }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
       if (!data.success) { setCreateError(data.error || "No se pudo crear el usuario"); setCreating(false); return; }
       setNewNombre(""); setNewEmail(""); setNewPassword("");
       setShowCreate(false);
       await fetchUsers();
-    } catch (e) { setCreateError(e.message); }
+    } catch (e) {
+      if (e.message !== 'SESSION_EXPIRED') setCreateError(e.message);
+    }
     finally { setCreating(false); }
   };
 
@@ -544,13 +562,14 @@ function SubUsersModal({ session, onClose }) {
     if (!confirm(`¿Eliminar al usuario ${user.nombre} (${user.email})? Esta acción no se puede deshacer.`)) return;
     setDeleting(user.user_id);
     try {
-      const res = await fetch(CONFIG.SUB_USERS_DELETE_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+      await authFetch(CONFIG.SUB_USERS_DELETE_URL, {
+        method: "POST",
         body: JSON.stringify({ nit: session.nit, user_id: user.user_id }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchUsers();
-    } catch (e) { alert("Error al eliminar: " + e.message); }
+    } catch (e) {
+      if (e.message !== 'SESSION_EXPIRED') alert("Error al eliminar: " + e.message);
+    }
     finally { setDeleting(null); }
   };
 
@@ -650,7 +669,7 @@ function SubUsersModal({ session, onClose }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// MODAL DE CONFIGURACIÓN DE APIs (sin cambios)
+// MODAL DE CONFIGURACIÓN DE APIs (sin cambios en UI)
 // ═══════════════════════════════════════════════════════════════
 function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [dianUrl, setDianUrl] = useState(credentials?.dianUrl || "");
@@ -798,17 +817,22 @@ function AiInsights({ inv }) {
   );
 }
 
-function DianStatus({ cufe, credentials }) {
+// ⭐ DianStatus ahora recibe authFetch y nit como props
+function DianStatus({ cufe, credentials, authFetch, nit }) {
   const [status, setStatus] = useState("idle");
   const [detail, setDetail] = useState("");
   useEffect(() => {
     if (!credentials?.dianUrl) { setStatus("no_creds"); return; }
     if (!cufe) return;
     setStatus("checking");
-    fetch(CONFIG.DIAN_VALIDATE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cufe, dianUrl: credentials.dianUrl }) })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
-      .then(data => { setStatus(data.valid ? "valid" : "invalid"); setDetail(data.message || ""); })
-      .catch(() => { setStatus("invalid"); setDetail("No se pudo validar"); });
+    authFetch(CONFIG.DIAN_VALIDATE_URL, {
+      method: "POST",
+      body: JSON.stringify({ nit, cufe, dianUrl: credentials.dianUrl })
+    })
+      .then(({ data }) => { setStatus(data.valid ? "valid" : "invalid"); setDetail(data.message || ""); })
+      .catch((e) => {
+        if (e.message !== 'SESSION_EXPIRED') { setStatus("invalid"); setDetail("No se pudo validar"); }
+      });
   }, [cufe, credentials?.dianUrl]);
 
   if (status === "no_creds") return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef3c7", border: "1px solid #fbbf24", fontSize: 12, color: "#92400e" }}>⚠ Conecta el API DIAN para validación automática</div>;
@@ -817,7 +841,8 @@ function DianStatus({ cufe, credentials }) {
   return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#991b1b" }}>✗ No validada {detail && `· ${detail}`}</div>;
 }
 
-function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
+// ⭐ InvoiceDetail ahora recibe authFetch y session
+function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading, authFetch, session }) {
   const [selected1, setSelected1] = useState("");
   const [selected2, setSelected2] = useState("");
   const [selected3, setSelected3] = useState("");
@@ -853,7 +878,7 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading }) {
       <Field label="CUFE" value={inv.cufe} mono />
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 6 }}>VALIDACIÓN DIAN</div>
-        <DianStatus cufe={inv.cufe} credentials={credentials} />
+        <DianStatus cufe={inv.cufe} credentials={credentials} authFetch={authFetch} nit={session?.nit} />
       </div>
       <AiInsights inv={inv} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -1132,7 +1157,7 @@ function DashboardView({ stats, loading }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ASISTENTE (sin cambios)
+// ASISTENTE
 // ═══════════════════════════════════════════════════════════════
 function getQuickPrompts(ctx) {
   if (!ctx.session) return ["¿Qué es este sistema y cómo funciona?", "¿Cómo cambio mi contraseña?", "¿Qué documentos procesa el asistente?"];
@@ -1152,7 +1177,8 @@ function AssistantMessage({ role, content }) {
   );
 }
 
-function AssistantChat({ open, onClose, context }) {
+// ⭐ AssistantChat ahora recibe authFetch
+function AssistantChat({ open, onClose, context, authFetch }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -1183,28 +1209,50 @@ function AssistantChat({ open, onClose, context }) {
     setInput("");
     setSending(true);
     try {
-      const res = await fetch(CONFIG.ASSISTANT_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: newMessages.filter(m => m.role !== "system"),
-          context: {
-            nit: context.session?.nit || null,
-            empresa: context.session?.empresa || null,
-            software_contable: context.session?.software_contable || null,
-            actividad: context.session?.actividad || null,
-            erp_fields: context.erpParams?.fields || null,
-            currentInvoice: context.currentInvoice || null,
-            currentTab: context.currentTab || null,
-            dashboardStats: context.dashboardStats || null,
-          },
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : { reply: "(Respuesta vacía del servidor)" };
+      // ⭐ Si hay sesión activa, usar authFetch (endpoint protegido con JWT).
+      // Si no hay sesión (usuario no logueado), usar fetch normal (el asistente puede responder generalidades).
+      let data;
+      if (context.session && authFetch) {
+        const result = await authFetch(CONFIG.ASSISTANT_URL, {
+          method: "POST",
+          body: JSON.stringify({
+            nit: context.session?.nit,
+            messages: newMessages.filter(m => m.role !== "system"),
+            context: {
+              nit: context.session?.nit || null,
+              empresa: context.session?.empresa || null,
+              software_contable: context.session?.software_contable || null,
+              actividad: context.session?.actividad || null,
+              erp_fields: context.erpParams?.fields || null,
+              currentInvoice: context.currentInvoice || null,
+              currentTab: context.currentTab || null,
+              dashboardStats: context.dashboardStats || null,
+            },
+          }),
+        });
+        data = result.data;
+      } else {
+        const res = await fetch(CONFIG.ASSISTANT_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: newMessages.filter(m => m.role !== "system"),
+            context: {
+              nit: null, empresa: null, software_contable: null, actividad: null,
+              erp_fields: null, currentInvoice: null, currentTab: null, dashboardStats: null,
+            },
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        data = text ? JSON.parse(text) : { reply: "(Respuesta vacía del servidor)" };
+      }
       setMessages([...newMessages, { role: "assistant", content: data.reply || "(sin respuesta)" }]);
     } catch (e) {
-      setMessages([...newMessages, { role: "assistant", content: "⚠ Error: " + e.message }]);
+      if (e.message === 'SESSION_EXPIRED') {
+        setMessages([...newMessages, { role: "assistant", content: "⚠ Tu sesión expiró. Inicia sesión de nuevo." }]);
+      } else {
+        setMessages([...newMessages, { role: "assistant", content: "⚠ Error: " + e.message }]);
+      }
     } finally { setSending(false); }
   };
 
@@ -1243,7 +1291,8 @@ function AssistantChat({ open, onClose, context }) {
   );
 }
 
-function AssistantFAB({ context }) {
+// ⭐ AssistantFAB ahora recibe authFetch
+function AssistantFAB({ context, authFetch }) {
   const [open, setOpen] = useState(false);
   return (
     <React.Fragment>
@@ -1251,15 +1300,15 @@ function AssistantFAB({ context }) {
         onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
         onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
       >{open ? "×" : "💬"}</button>
-      <AssistantChat open={open} onClose={() => setOpen(false)} context={context} />
+      <AssistantChat open={open} onClose={() => setOpen(false)} context={context} authFetch={authFetch} />
     </React.Fragment>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ⭐ DASHBOARD (con soporte para role master/sub_user)
+// ⭐ DASHBOARD — ahora recibe authFetch y lo propaga a sub-componentes
 // ═══════════════════════════════════════════════════════════════
-function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
+function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePassword }) {
   const [facturas, setFacturas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1282,13 +1331,16 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
   const fetchFacturas = async () => {
     setLoading(true); setError("");
     try {
-      const url = `${CONFIG.FACTURAS_URL}?nit=${encodeURIComponent(session.nit)}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : [];
+      // ⭐ Cambio GET → POST con body JSON (para que Verificar JWT pueda cross-check el nit)
+      const { data } = await authFetch(CONFIG.FACTURAS_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit }),
+      });
       setFacturas(Array.isArray(data) ? data : (data ? [data] : []));
-    } catch (e) { setError("No se pudieron cargar las facturas: " + e.message); setFacturas([]); }
+    } catch (e) {
+      if (e.message !== 'SESSION_EXPIRED') setError("No se pudieron cargar las facturas: " + e.message);
+      setFacturas([]);
+    }
     finally { setLoading(false); }
   };
 
@@ -1296,14 +1348,14 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
     if (!creds?.erpKey || !creds?.erpUrl) { setErpParams(null); return; }
     setErpLoading(true);
     try {
-      const res = await fetch(CONFIG.ERP_PARAMS_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ software: session.software_contable, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey, empresa_nit: session.nit }),
+      const { data } = await authFetch(CONFIG.ERP_PARAMS_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, software: session.software_contable, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey, empresa_nit: session.nit }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
       setErpParams(data);
-    } catch (e) { console.error(e); setErpParams({ fields: [] }); }
+    } catch (e) {
+      if (e.message !== 'SESSION_EXPIRED') { console.error(e); setErpParams({ fields: [] }); }
+    }
     finally { setErpLoading(false); }
   };
 
@@ -1320,15 +1372,17 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
   const handleCausar = async (inv, extras) => {
     try {
       const payload = { ...inv, ...extras, usuario: session.correo || session.email || session.nit, empresa_nit: session.nit, software_contable: session.software_contable, credentials, causado_at: new Date().toISOString() };
-      const res = await fetch(CONFIG.CAUSAR_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : { success: false, error: 'Respuesta vacía' };
+      const { data } = await authFetch(CONFIG.CAUSAR_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, ...payload })
+      });
       if (!data.success) throw new Error(data.error || 'Error desconocido');
       setCausadas((p) => new Set([...p, inv.cufe]));
       alert(`✓ Factura ${inv.numero_factura} causada en ${session.software_contable}`);
       setExpanded(null);
-    } catch (e) { alert("Error al causar: " + e.message); }
+    } catch (e) {
+      if (e.message !== 'SESSION_EXPIRED') alert("Error al causar: " + e.message);
+    }
   };
 
   const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
@@ -1526,7 +1580,7 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
                             <div style={{ minWidth: 110 }}><Badge status={isCausada ? "CAUSADA" : inv.estado} /></div>
                             <div style={{ fontSize: 16, color: "#94a3b8", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</div>
                           </div>
-                          {isExpanded && !isCausada && <InvoiceDetail inv={inv} onCausar={handleCausar} credentials={credentials} erpParams={erpParams} erpLoading={erpLoading} />}
+                          {isExpanded && !isCausada && <InvoiceDetail inv={inv} onCausar={handleCausar} credentials={credentials} erpParams={erpParams} erpLoading={erpLoading} authFetch={authFetch} session={session} />}
                           {isExpanded && isCausada && <div style={{ background: "#f0fdf4", padding: 20, borderTop: "1px solid #dcfce7", textAlign: "center", color: "#166534", fontSize: 13 }}>✓ Esta factura ya fue causada</div>}
                         </div>
                       );
@@ -1545,35 +1599,38 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
         <ApiSettingsModal session={session} credentials={credentials} onClose={() => setShowSettings(false)}
           onSave={async (creds) => {
             try {
-              const res = await fetch(CONFIG.SAVE_CREDENTIALS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nit: session.nit, dianUrl: creds.dianUrl, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey }) });
-              if (!res.ok) throw new Error(`HTTP ${res.status}`);
-              const text = await res.text();
-              const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+              const { data } = await authFetch(CONFIG.SAVE_CREDENTIALS_URL, {
+                method: "POST",
+                body: JSON.stringify({ nit: session.nit, dianUrl: creds.dianUrl, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey })
+              });
               if (!data.success) throw new Error(data.error || "Error al guardar");
               setCredentials({ ...creds, updatedAt: data.updated_at || new Date().toISOString() });
               setShowSettings(false);
               alert("✓ Credenciales guardadas. Cargando parámetros del ERP...");
             } catch (e) {
+              if (e.message === 'SESSION_EXPIRED') return;
               setCredentials(creds); setShowSettings(false);
               alert("⚠ Credenciales aplicadas localmente: " + e.message);
             }
           }}
           onDelete={async () => {
             try {
-              const res = await fetch(CONFIG.DELETE_CREDENTIALS_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nit: session.nit }) });
-              if (!res.ok) throw new Error(`HTTP ${res.status}`);
-              const text = await res.text();
-              const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+              const { data } = await authFetch(CONFIG.DELETE_CREDENTIALS_URL, {
+                method: "POST",
+                body: JSON.stringify({ nit: session.nit })
+              });
               if (!data.success) throw new Error(data.error || "Error al olvidar credenciales");
               setCredentials(null); setErpParams(null); setShowSettings(false);
               alert("✓ Credenciales olvidadas.");
-            } catch (e) { alert("⚠ Error: " + e.message); }
+            } catch (e) {
+              if (e.message !== 'SESSION_EXPIRED') alert("⚠ Error: " + e.message);
+            }
           }}
         />
       )}
 
       {showSubUsers && isMaster && (
-        <SubUsersModal session={session} onClose={() => setShowSubUsers(false)} />
+        <SubUsersModal session={session} onClose={() => setShowSubUsers(false)} authFetch={authFetch} />
       )}
     </div>
   );
@@ -1606,6 +1663,32 @@ function App() {
     window.history.replaceState({}, "", url.toString());
   };
 
+  // ⭐ Helper authFetch global — añade Bearer token, maneja 401 y body vacío
+  const authFetch = async (url, options = {}) => {
+    const token = session?.access_token;
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
+    const r = await fetch(url, { ...options, headers });
+    const text = await r.text();
+
+    // Body vacío (bloqueado por JWT/rate-limit) o 401 → logout automático
+    if (!text || r.status === 401) {
+      console.warn('authFetch: token inválido/expirado → logout automático');
+      setSession(null);
+      setView("login");
+      throw new Error('SESSION_EXPIRED');
+    }
+
+    let data;
+    try { data = JSON.parse(text); }
+    catch (e) { throw new Error('RESPONSE_NOT_JSON'); }
+
+    return { ok: r.ok, status: r.status, data };
+  };
+
   let screen;
   if (view === "reset" && resetToken) {
     screen = <ResetPasswordScreen token={resetToken} onSuccess={() => { clearResetTokenFromUrl(); setResetToken(null); setView("login"); }} />;
@@ -1622,7 +1705,7 @@ function App() {
       onSuccess={() => { setView("dashboard"); alert("✓ Contraseña actualizada correctamente."); }}
       onCancel={() => setView("dashboard")} />;
   } else if (view === "dashboard" && session) {
-    screen = <Dashboard session={session} onLogout={() => { setSession(null); setView("login"); }} onChangePassword={() => setView("change_voluntary")} onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))} />;
+    screen = <Dashboard session={session} authFetch={authFetch} onLogout={() => { setSession(null); setView("login"); }} onChangePassword={() => setView("change_voluntary")} onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))} />;
   } else {
     screen = <LoginScreen onLogin={(data) => { setSession(data); setView("dashboard"); }} onForgotPassword={() => setView("forgot")} onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }} />;
   }
@@ -1630,7 +1713,7 @@ function App() {
   return (
     <React.Fragment>
       {screen}
-      <AssistantFAB context={assistantContext} />
+      <AssistantFAB context={assistantContext} authFetch={session ? authFetch : null} />
     </React.Fragment>
   );
 }
