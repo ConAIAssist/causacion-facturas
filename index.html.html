@@ -42,6 +42,12 @@ const CONFIG = {
   CHANGE_PASSWORD_URL: "https://conaiassist.app.n8n.cloud/webhook/api/change-password",
   REQUEST_RESET_URL: "https://conaiassist.app.n8n.cloud/webhook/api/request-password-reset",
   RESET_PASSWORD_URL: "https://conaiassist.app.n8n.cloud/webhook/api/reset-password",
+  // ⭐ Nuevos endpoints para sub-usuarios
+  SUB_USER_LOGIN_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-user-login",
+  SUB_USERS_LIST_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/list",
+  SUB_USERS_CREATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/create",
+  SUB_USERS_DELETE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/delete",
+  SUB_USER_REQUEST_PW_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/request-password-change",
 };
 
 const SOFTWARE_API_URLS = {
@@ -54,7 +60,6 @@ const SOFTWARE_API_URLS = {
   Odoo: "https://tuinstancia.odoo.com",
 };
 
-// Paleta de colores consistente para gráficas
 const CHART_COLORS = {
   primary: "#0f172a",
   pendiente: "#f59e0b",
@@ -70,7 +75,7 @@ const CHART_COLORS = {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// UTILIDADES (compartidas entre tabs)
+// UTILIDADES
 // ═══════════════════════════════════════════════════════════════
 function fmt(n) { return "$" + (Number(n) || 0).toLocaleString("es-CO"); }
 function fmtCompact(n) {
@@ -97,7 +102,7 @@ function monthLabel(d) {
 function weekStart(d) {
   const dt = new Date(d);
   const day = dt.getDay();
-  const diff = dt.getDate() - day + (day === 0 ? -6 : 1); // Lunes
+  const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
   return new Date(dt.setDate(diff));
 }
 
@@ -119,8 +124,11 @@ function AuthLayout({ title, subtitle, children }) {
   );
 }
 
+// ⭐ Nuevo LoginScreen con toggle master / sub-user
 function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
+  const [loginType, setLoginType] = useState("master"); // "master" | "sub_user"
   const [nit, setNit] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -130,27 +138,63 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
     setError("");
     const nitLimpio = nit.replace(/\D/g, "");
     if (!nitLimpio || nitLimpio.length < 6) { setError("Ingresa un NIT válido (mínimo 6 dígitos)"); return; }
+    if (loginType === "sub_user" && (!email || !email.includes("@"))) { setError("Ingresa un email válido"); return; }
     if (!password) { setError("Ingresa tu contraseña"); return; }
     setLoading(true);
     try {
-      const res = await fetch(CONFIG.LOGIN_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nit: nitLimpio, password }),
-      });
-      if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : { valid: false, error: "NIT o contraseña incorrectos" };
-      if (!data.valid) { setError(data.error || "NIT o contraseña incorrectos"); setLoading(false); return; }
-      if (data.requires_password_change) {
-        onRequirePasswordChange({ nit: nitLimpio, change_token: data.change_token });
-        setLoading(false); return;
+      if (loginType === "master") {
+        const res = await fetch(CONFIG.LOGIN_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nit: nitLimpio, password }),
+        });
+        if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : { valid: false, error: "NIT o contraseña incorrectos" };
+        if (!data.valid) { setError(data.error || "NIT o contraseña incorrectos"); setLoading(false); return; }
+        if (data.requires_password_change) {
+          onRequirePasswordChange({ nit: nitLimpio, change_token: data.change_token });
+          setLoading(false); return;
+        }
+        onLogin({ ...data, nit: nitLimpio, role: "master" });
+      } else {
+        // Login sub-usuario
+        const res = await fetch(CONFIG.SUB_USER_LOGIN_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nit: nitLimpio, email: email.trim().toLowerCase(), password }),
+        });
+        if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : { valid: false, error: "Credenciales inválidas" };
+        if (!data.valid) { setError(data.error || "Credenciales inválidas"); setLoading(false); return; }
+        onLogin({ ...data, nit: nitLimpio, role: "sub_user" });
       }
-      onLogin({ ...data, nit: nitLimpio });
     } catch (err) { setError(err.message); setLoading(false); }
   };
 
+  const canSubmit = nit && password && (loginType === "master" || email);
+
   return (
-    <AuthLayout title="Causación de Facturas" subtitle="Inicia sesión con el NIT de tu empresa">
+    <AuthLayout title="Causación de Facturas" subtitle={loginType === "master" ? "Inicia sesión con el NIT de tu empresa" : "Inicia sesión con tu cuenta de usuario"}>
+      {/* Toggle de tipo de login */}
+      <div style={{ display: "flex", gap: 0, marginBottom: 18, background: "#f1f5f9", padding: 4, borderRadius: 10 }}>
+        <button type="button" onClick={() => { setLoginType("master"); setError(""); }} disabled={loading} style={{
+          flex: 1, padding: "8px 12px", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700,
+          cursor: loading ? "not-allowed" : "pointer",
+          background: loginType === "master" ? "#fff" : "transparent",
+          color: loginType === "master" ? "#0f172a" : "#64748b",
+          boxShadow: loginType === "master" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+          fontFamily: "inherit",
+        }}>🏢 Empresa (admin)</button>
+        <button type="button" onClick={() => { setLoginType("sub_user"); setError(""); }} disabled={loading} style={{
+          flex: 1, padding: "8px 12px", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700,
+          cursor: loading ? "not-allowed" : "pointer",
+          background: loginType === "sub_user" ? "#fff" : "transparent",
+          color: loginType === "sub_user" ? "#0f172a" : "#64748b",
+          boxShadow: loginType === "sub_user" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+          fontFamily: "inherit",
+        }}>👤 Usuario</button>
+      </div>
+
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
@@ -158,20 +202,36 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
           <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Solo números, sin dígito de verificación</div>
         </div>
+
+        {loginType === "sub_user" && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CORREO ELECTRÓNICO</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@empresa.com" disabled={loading}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+          </div>
+        )}
+
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONTRASEÑA</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" disabled={loading}
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
         </div>
         {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
-        <button type="submit" disabled={loading || !nit || !password} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !nit || !password ? "not-allowed" : "pointer", background: loading || !nit || !password ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !nit || !password ? 0.6 : 1 }}>
+        <button type="submit" disabled={loading || !canSubmit} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !canSubmit ? "not-allowed" : "pointer", background: loading || !canSubmit ? "#94a3b8" : "#0f172a", color: "#fff", opacity: loading || !canSubmit ? 0.6 : 1 }}>
           {loading ? <span><span className="spin">⟳</span> Verificando...</span> : "Ingresar"}
         </button>
-        <div style={{ textAlign: "center", marginTop: 16 }}>
-          <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", color: "#0369a1", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>
-            ¿Olvidaste tu contraseña?
-          </button>
-        </div>
+        {loginType === "master" && (
+          <div style={{ textAlign: "center", marginTop: 16 }}>
+            <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", color: "#0369a1", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", textDecoration: "underline" }}>
+              ¿Olvidaste tu contraseña?
+            </button>
+          </div>
+        )}
+        {loginType === "sub_user" && (
+          <div style={{ textAlign: "center", marginTop: 16, fontSize: 11, color: "#94a3b8" }}>
+            Si olvidaste tu contraseña, contacta al administrador de tu empresa.
+          </div>
+        )}
       </form>
     </AuthLayout>
   );
@@ -302,44 +362,95 @@ function ResetPasswordScreen({ token, onSuccess }) {
   );
 }
 
-function ChangePasswordScreen({ mode, nit, changeToken, onSuccess, onCancel }) {
+// ⭐ ChangePasswordScreen modificado: incluye modo "sub_user" que requiere aprobación
+function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCancel }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [submittedPending, setSubmittedPending] = useState(false);
+
   const isForced = mode === "forced";
+  const isSubUser = mode === "sub_user";
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     if (newPassword.length < 8) { setError("La nueva contraseña debe tener al menos 8 caracteres"); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
-    if (!isForced && !currentPassword) { setError("Ingresa tu contraseña actual"); return; }
+    if ((isSubUser || !isForced) && !currentPassword) { setError("Ingresa tu contraseña actual"); return; }
     setLoading(true);
     try {
-      const payload = { nit, newPassword };
-      if (isForced) payload.change_token = changeToken;
-      else payload.currentPassword = currentPassword;
-      const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
-      if (!data.success) { setError(data.error || "No se pudo cambiar la contraseña"); setLoading(false); return; }
-      onSuccess();
+      if (isSubUser) {
+        const res = await fetch(CONFIG.SUB_USER_REQUEST_PW_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nit: session.nit,
+            user_id: session.user_id,
+            currentPassword,
+            newPassword,
+          }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+        if (!data.success) { setError(data.error || "No se pudo enviar la solicitud"); setLoading(false); return; }
+        setSubmittedPending(true);
+      } else {
+        const payload = { nit, newPassword };
+        if (isForced) payload.change_token = changeToken;
+        else payload.currentPassword = currentPassword;
+        const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+        if (!data.success) { setError(data.error || "No se pudo cambiar la contraseña"); setLoading(false); return; }
+        onSuccess();
+      }
     } catch (err) { setError(err.message); setLoading(false); }
   };
 
+  if (submittedPending) {
+    return (
+      <AuthLayout title="Solicitud enviada" subtitle="Tu administrador recibirá un correo para aprobar el cambio">
+        <div style={{ background: "#dbeafe", border: "1px solid #93c5fd", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#1e40af", marginBottom: 16, textAlign: "center" }}>
+          📧 Hemos enviado la solicitud al administrador
+        </div>
+        <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6, marginBottom: 16 }}>
+          Cuando el administrador apruebe el cambio, recibirás un correo de confirmación y podrás iniciar sesión con tu nueva contraseña. Mientras tanto, tu contraseña actual sigue funcionando.
+        </div>
+        <button onClick={onCancel} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+          Volver
+        </button>
+      </AuthLayout>
+    );
+  }
+
+  let title, subtitle;
+  if (isForced) {
+    title = "Cambia tu contraseña";
+    subtitle = "Por seguridad, debes cambiar la contraseña temporal antes de continuar";
+  } else if (isSubUser) {
+    title = "Solicitar cambio de contraseña";
+    subtitle = "Como usuario, el cambio requiere aprobación del administrador de tu empresa";
+  } else {
+    title = "Cambiar contraseña";
+    subtitle = "Ingresa tu contraseña actual y la nueva";
+  }
+
   return (
-    <AuthLayout
-      title={isForced ? "Cambia tu contraseña" : "Cambiar contraseña"}
-      subtitle={isForced ? "Por seguridad, debes cambiar la contraseña temporal antes de continuar" : "Ingresa tu contraseña actual y la nueva"}
-    >
+    <AuthLayout title={title} subtitle={subtitle}>
+      {isSubUser && (
+        <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#92400e", marginBottom: 16 }}>
+          ⚠ Tu solicitud se enviará al administrador por correo. El cambio solo surte efecto cuando él lo apruebe.
+        </div>
+      )}
       <form onSubmit={handleSubmit}>
-        {!isForced && (
+        {(!isForced || isSubUser) && (
           <div style={{ marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONTRASEÑA ACTUAL</label>
             <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoFocus disabled={loading}
@@ -358,13 +469,183 @@ function ChangePasswordScreen({ mode, nit, changeToken, onSuccess, onCancel }) {
         </div>
         {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
         <button type="submit" disabled={loading} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", background: loading ? "#94a3b8" : "#0f172a", color: "#fff", marginBottom: 10 }}>
-          {loading ? <span><span className="spin">⟳</span> Guardando...</span> : "Guardar nueva contraseña"}
+          {loading ? <span><span className="spin">⟳</span> {isSubUser ? "Enviando..." : "Guardando..."}</span> : (isSubUser ? "Solicitar cambio" : "Guardar nueva contraseña")}
         </button>
         {!isForced && (
           <button type="button" onClick={onCancel} disabled={loading} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
         )}
       </form>
     </AuthLayout>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ⭐ MODAL DE GESTIÓN DE SUB-USUARIOS (solo master)
+// ═══════════════════════════════════════════════════════════════
+function SubUsersModal({ session, onClose }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [deleting, setDeleting] = useState(null);
+
+  const [newNombre, setNewNombre] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  const fetchUsers = async () => {
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(CONFIG.SUB_USERS_LIST_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nit: session.nit }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : { success: false, users: [] };
+      setUsers(data.users || []);
+    } catch (e) { setError("No se pudieron cargar los usuarios: " + e.message); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchUsers(); }, []);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setCreateError("");
+    if (!newNombre.trim() || !newEmail.trim() || !newPassword) { setCreateError("Todos los campos son requeridos"); return; }
+    if (newPassword.length < 8) { setCreateError("La contraseña debe tener al menos 8 caracteres"); return; }
+    if (!newEmail.includes("@")) { setCreateError("Email inválido"); return; }
+    setCreating(true);
+    try {
+      const res = await fetch(CONFIG.SUB_USERS_CREATE_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nit: session.nit,
+          nombre: newNombre.trim(),
+          email: newEmail.trim().toLowerCase(),
+          password: newPassword,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+      if (!data.success) { setCreateError(data.error || "No se pudo crear el usuario"); setCreating(false); return; }
+      setNewNombre(""); setNewEmail(""); setNewPassword("");
+      setShowCreate(false);
+      await fetchUsers();
+    } catch (e) { setCreateError(e.message); }
+    finally { setCreating(false); }
+  };
+
+  const handleDelete = async (user) => {
+    if (!confirm(`¿Eliminar al usuario ${user.nombre} (${user.email})? Esta acción no se puede deshacer.`)) return;
+    setDeleting(user.user_id);
+    try {
+      const res = await fetch(CONFIG.SUB_USERS_DELETE_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nit: session.nit, user_id: user.user_id }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await fetchUsers();
+    } catch (e) { alert("Error al eliminar: " + e.message); }
+    finally { setDeleting(null); }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 640, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>GESTIÓN DE USUARIOS</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>👥 Usuarios de la empresa</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>Crea cuentas adicionales para tu equipo. Todos comparten el mismo dashboard.</div>
+          </div>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
+        </div>
+
+        {!showCreate && (
+          <button onClick={() => setShowCreate(true)} style={{ width: "100%", padding: 12, borderRadius: 10, border: "2px dashed #cbd5e1", background: "#f8fafc", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569", marginBottom: 16 }}>
+            + Agregar usuario
+          </button>
+        )}
+
+        {showCreate && (
+          <form onSubmit={handleCreate} style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 12, letterSpacing: "0.1em" }}>NUEVO USUARIO</div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>NOMBRE</label>
+              <input type="text" value={newNombre} onChange={(e) => setNewNombre(e.target.value)} placeholder="Ej: Juan Pérez" autoFocus disabled={creating}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>EMAIL</label>
+              <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="juan@empresa.com" disabled={creating}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>CONTRASEÑA INICIAL</label>
+              <input type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" disabled={creating}
+                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 4 }}>Compártela de forma segura con el usuario. Ellos podrán pedir cambiarla después (con tu aprobación).</div>
+            </div>
+            {createError && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#991b1b", marginBottom: 10 }}>{createError}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => { setShowCreate(false); setCreateError(""); }} disabled={creating} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
+              <button type="submit" disabled={creating} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontSize: 12, fontWeight: 700, cursor: creating ? "not-allowed" : "pointer" }}>
+                {creating ? "Creando..." : "Crear usuario"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+
+        {loading ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 13 }}><span className="spin">⟳</span> Cargando usuarios...</div>
+        ) : users.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 13 }}>
+            No hay usuarios adicionales. Crea el primero arriba.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {users.map(u => (
+              <div key={u.user_id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: "50%", background: u.status === "disabled" ? "#f1f5f9" : "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
+                  {u.status === "disabled" ? "🚫" : "👤"}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{u.nombre}</div>
+                  <div style={{ fontSize: 11, color: "#64748b" }}>{u.email}</div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                    {u.has_pending_change && (
+                      <span style={{ fontSize: 9, background: "#fef3c7", color: "#92400e", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>⏳ CAMBIO PENDIENTE</span>
+                    )}
+                    {u.status === "disabled" && (
+                      <span style={{ fontSize: 9, background: "#fee2e2", color: "#991b1b", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>DESACTIVADO</span>
+                    )}
+                    {u.last_login_at && (
+                      <span style={{ fontSize: 9, color: "#94a3b8" }}>Último acceso: {dateStr(u.last_login_at)}</span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={() => handleDelete(u)} disabled={deleting === u.user_id} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #fecaca", background: "#fff", fontSize: 11, fontWeight: 600, cursor: deleting === u.user_id ? "not-allowed" : "pointer", color: "#b91c1c" }}>
+                  {deleting === u.user_id ? "..." : "Eliminar"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {users.length > 0 && users.some(u => u.has_pending_change) && (
+          <div style={{ marginTop: 16, padding: "10px 14px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontSize: 11, color: "#92400e" }}>
+            💡 Revisa tu correo para aprobar o rechazar los cambios de contraseña pendientes.
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -642,10 +923,9 @@ function EmptyState({ icon, title, message }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ⭐ COMPUTE dashboardStats — corazón del dashboard y del agente
+// COMPUTE dashboardStats (sin cambios)
 // ═══════════════════════════════════════════════════════════════
 function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
-  // facturas: array de invoices; causadasIds: Set<cufe>
   const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
   const isCausada = (f) => causadasIds.has(f.cufe) || f.estado === "CAUSADA";
 
@@ -662,7 +942,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
   const totalReteica = facturas.reduce((s, f) => s + (Number(f.reteica) || 0), 0);
   const totalRetenciones = totalRetefuente + totalReteiva + totalReteica;
 
-  // ── Top proveedores (por monto) ──
   const bySupplier = {};
   facturas.forEach(f => {
     const key = f.emisor || "(sin emisor)";
@@ -670,10 +949,8 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     bySupplier[key].total += Number(f.total) || 0;
     bySupplier[key].count += 1;
   });
-  const topProveedores = Object.values(bySupplier)
-    .sort((a, b) => b.total - a.total).slice(0, 10);
+  const topProveedores = Object.values(bySupplier).sort((a, b) => b.total - a.total).slice(0, 10);
 
-  // ── Por categoría ──
   const byCategoria = {};
   facturas.forEach(f => {
     const key = f.categoria || "Sin categorizar";
@@ -683,18 +960,12 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
   });
   const categorias = Object.values(byCategoria).sort((a, b) => b.value - a.value);
 
-  // ── Por nivel de riesgo ──
   const byRisk = { bajo: 0, medio: 0, alto: 0, "sin clasificar": 0 };
   const byRiskAmount = { bajo: 0, medio: 0, alto: 0, "sin clasificar": 0 };
   facturas.forEach(f => {
     const k = (f.risk_level || "sin clasificar").toLowerCase();
-    if (byRisk[k] !== undefined) {
-      byRisk[k] += 1;
-      byRiskAmount[k] += Number(f.total) || 0;
-    } else {
-      byRisk["sin clasificar"] += 1;
-      byRiskAmount["sin clasificar"] += Number(f.total) || 0;
-    }
+    if (byRisk[k] !== undefined) { byRisk[k] += 1; byRiskAmount[k] += Number(f.total) || 0; }
+    else { byRisk["sin clasificar"] += 1; byRiskAmount["sin clasificar"] += Number(f.total) || 0; }
   });
   const riesgoData = [
     { name: "Bajo", count: byRisk.bajo, monto: byRiskAmount.bajo, color: CHART_COLORS.risk_bajo },
@@ -702,7 +973,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     { name: "Alto", count: byRisk.alto, monto: byRiskAmount.alto, color: CHART_COLORS.risk_alto },
   ].filter(r => r.count > 0);
 
-  // ── Evolución temporal (por mes) ──
   const byMonth = {};
   facturas.forEach(f => {
     const d = dateFromInv(f);
@@ -715,7 +985,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
   });
   const evolucionMensual = Object.values(byMonth).sort((a, b) => a.timestamp - b.timestamp);
 
-  // ── Retenciones por mes (para grafica apilada) ──
   const retencionesPorMes = {};
   facturas.forEach(f => {
     const d = dateFromInv(f);
@@ -726,37 +995,20 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     retencionesPorMes[key].reteiva += Number(f.reteiva) || 0;
     retencionesPorMes[key].reteica += Number(f.reteica) || 0;
   });
-  const retencionesData = Object.values(retencionesPorMes)
-    .filter(r => r.retefuente + r.reteiva + r.reteica > 0)
-    .sort((a, b) => a.timestamp - b.timestamp);
+  const retencionesData = Object.values(retencionesPorMes).filter(r => r.retefuente + r.reteiva + r.reteica > 0).sort((a, b) => a.timestamp - b.timestamp);
 
-  // ── Ticket promedio ──
   const ticketPromedio = count > 0 ? totalFacturado / count : 0;
 
   return {
-    count,
-    count_aprobadas: aprobadas.length,
-    count_pendientes: pendientes.length,
-    count_causadas: causadas.length,
-    totalFacturado,
-    totalNetoPagar,
-    totalIva,
-    totalRetefuente,
-    totalReteiva,
-    totalReteica,
-    totalRetenciones,
-    ticketPromedio,
-    topProveedores,
-    categorias,
-    riesgoData,
-    evolucionMensual,
-    retencionesData,
+    count, count_aprobadas: aprobadas.length, count_pendientes: pendientes.length, count_causadas: causadas.length,
+    totalFacturado, totalNetoPagar, totalIva, totalRetefuente, totalReteiva, totalReteica, totalRetenciones,
+    ticketPromedio, topProveedores, categorias, riesgoData, evolucionMensual, retencionesData,
     periodo: { desde: dateFrom || null, hasta: dateTo || null, filtro_activo: !!(dateFrom || dateTo) },
   };
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ⭐ DASHBOARD TAB — gráficas interactivas
+// DASHBOARD TAB (sin cambios)
 // ═══════════════════════════════════════════════════════════════
 function ChartCard({ title, subtitle, children, height = 280 }) {
   return (
@@ -771,12 +1023,8 @@ function ChartCard({ title, subtitle, children, height = 280 }) {
 }
 
 function DashboardView({ stats, loading }) {
-  if (loading) {
-    return <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando datos...</div>;
-  }
-  if (stats.count === 0) {
-    return <EmptyState icon="📊" title="Sin datos para mostrar" message="No hay facturas en el período seleccionado. Ajusta los filtros o espera que lleguen facturas procesadas." />;
-  }
+  if (loading) return <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando datos...</div>;
+  if (stats.count === 0) return <EmptyState icon="📊" title="Sin datos para mostrar" message="No hay facturas en el período seleccionado. Ajusta los filtros o espera que lleguen facturas procesadas." />;
 
   const periodoLabel = stats.periodo.filtro_activo
     ? `${stats.periodo.desde ? dateStr(stats.periodo.desde) : "inicio"} — ${stats.periodo.hasta ? dateStr(stats.periodo.hasta) : "hoy"}`
@@ -784,21 +1032,16 @@ function DashboardView({ stats, loading }) {
 
   return (
     <React.Fragment>
-      {/* Período activo */}
       <div style={{ background: "#0f172a", color: "#e2e8f0", padding: "10px 16px", borderRadius: 10, marginBottom: 14, fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 14 }}>📅</span>
         <span><strong>{periodoLabel}</strong> · {stats.count} {stats.count === 1 ? "factura" : "facturas"} en el análisis</span>
       </div>
-
-      {/* KPIs */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
         <StatCard icon="💰" label="TOTAL FACTURADO" value={fmtCompact(stats.totalFacturado)} subtitle={`${stats.count} facturas`} />
         <StatCard icon="🎯" label="NETO A PAGAR" value={fmtCompact(stats.totalNetoPagar)} subtitle={`Retenciones: ${fmtCompact(stats.totalRetenciones)}`} />
         <StatCard icon="⏳" label="PENDIENTES DE CAUSAR" value={stats.count_pendientes} color="#f59e0b" subtitle={`${stats.count_causadas} causadas`} />
         <StatCard icon="📊" label="TICKET PROMEDIO" value={fmtCompact(stats.ticketPromedio)} subtitle="Por factura" />
       </div>
-
-      {/* Fila 1: Evolución temporal + Top proveedores */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14, marginBottom: 14 }}>
         <ChartCard title="📅 EVOLUCIÓN MENSUAL" subtitle="Facturas aprobadas vs causadas por mes">
           {stats.evolucionMensual.length === 0 ? (
@@ -817,7 +1060,6 @@ function DashboardView({ stats, loading }) {
             </ResponsiveContainer>
           )}
         </ChartCard>
-
         <ChartCard title="🏢 TOP 10 PROVEEDORES" subtitle="Por monto total facturado">
           {stats.topProveedores.length === 0 ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin proveedores</div>
@@ -834,8 +1076,6 @@ function DashboardView({ stats, loading }) {
           )}
         </ChartCard>
       </div>
-
-      {/* Fila 2: Categorías + Nivel de riesgo */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14, marginBottom: 14 }}>
         <ChartCard title="🗂 DISTRIBUCIÓN POR CATEGORÍA" subtitle="Monto facturado por tipo de gasto">
           {stats.categorias.length === 0 ? (
@@ -851,7 +1091,6 @@ function DashboardView({ stats, loading }) {
             </ResponsiveContainer>
           )}
         </ChartCard>
-
         <ChartCard title="⚠ DISTRIBUCIÓN POR NIVEL DE RIESGO" subtitle="Cantidad de facturas según evaluación IA">
           {stats.riesgoData.length === 0 ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin datos de riesgo</div>
@@ -868,8 +1107,6 @@ function DashboardView({ stats, loading }) {
           )}
         </ChartCard>
       </div>
-
-      {/* Fila 3: Retenciones */}
       <div style={{ marginBottom: 14 }}>
         <ChartCard title="🏛 RETENCIONES POR MES" subtitle="ReteFuente + ReteIVA + ReteICA acumulados" height={260}>
           {stats.retencionesData.length === 0 ? (
@@ -895,7 +1132,7 @@ function DashboardView({ stats, loading }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ASISTENTE (context incluye dashboardStats)
+// ASISTENTE (sin cambios)
 // ═══════════════════════════════════════════════════════════════
 function getQuickPrompts(ctx) {
   if (!ctx.session) return ["¿Qué es este sistema y cómo funciona?", "¿Cómo cambio mi contraseña?", "¿Qué documentos procesa el asistente?"];
@@ -945,11 +1182,9 @@ function AssistantChat({ open, onClose, context }) {
     setMessages(newMessages);
     setInput("");
     setSending(true);
-
     try {
       const res = await fetch(CONFIG.ASSISTANT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: newMessages.filter(m => m.role !== "system"),
           context: {
@@ -970,9 +1205,7 @@ function AssistantChat({ open, onClose, context }) {
       setMessages([...newMessages, { role: "assistant", content: data.reply || "(sin respuesta)" }]);
     } catch (e) {
       setMessages([...newMessages, { role: "assistant", content: "⚠ Error: " + e.message }]);
-    } finally {
-      setSending(false);
-    }
+    } finally { setSending(false); }
   };
 
   if (!open) return null;
@@ -1024,7 +1257,7 @@ function AssistantFAB({ context }) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// ⭐ DASHBOARD (con tabs + stats lifted up)
+// ⭐ DASHBOARD (con soporte para role master/sub_user)
 // ═══════════════════════════════════════════════════════════════
 function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
   const [facturas, setFacturas] = useState([]);
@@ -1037,10 +1270,14 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showSubUsers, setShowSubUsers] = useState(false);
   const [credentials, setCredentials] = useState(session.credentials && session.credentials.erpKey ? session.credentials : null);
   const [erpParams, setErpParams] = useState(null);
   const [erpLoading, setErpLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("facturas"); // "facturas" | "dashboard"
+  const [activeTab, setActiveTab] = useState("facturas");
+
+  const isMaster = session.role === "master";
+  const isSubUser = session.role === "sub_user";
 
   const fetchFacturas = async () => {
     setLoading(true); setError("");
@@ -1051,10 +1288,8 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
       const text = await res.text();
       const data = text ? JSON.parse(text) : [];
       setFacturas(Array.isArray(data) ? data : (data ? [data] : []));
-    } catch (e) {
-      setError("No se pudieron cargar las facturas: " + e.message);
-      setFacturas([]);
-    } finally { setLoading(false); }
+    } catch (e) { setError("No se pudieron cargar las facturas: " + e.message); setFacturas([]); }
+    finally { setLoading(false); }
   };
 
   const fetchErpParams = async (creds) => {
@@ -1075,20 +1310,16 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
   useEffect(() => { fetchFacturas(); }, []);
   useEffect(() => { if (credentials) fetchErpParams(credentials); }, [credentials]);
   useEffect(() => { if (onContextChange) onContextChange({ erpParams }); }, [erpParams]);
-
   useEffect(() => {
     if (!onContextChange) return;
     const current = expanded ? facturas.find(f => f.cufe === expanded) : null;
     onContextChange({ currentInvoice: current });
   }, [expanded, facturas]);
-
-  useEffect(() => {
-    if (onContextChange) onContextChange({ currentTab: activeTab });
-  }, [activeTab]);
+  useEffect(() => { if (onContextChange) onContextChange({ currentTab: activeTab }); }, [activeTab]);
 
   const handleCausar = async (inv, extras) => {
     try {
-      const payload = { ...inv, ...extras, usuario: session.correo || session.nit, empresa_nit: session.nit, software_contable: session.software_contable, credentials, causado_at: new Date().toISOString() };
+      const payload = { ...inv, ...extras, usuario: session.correo || session.email || session.nit, empresa_nit: session.nit, software_contable: session.software_contable, credentials, causado_at: new Date().toISOString() };
       const res = await fetch(CONFIG.CAUSAR_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
@@ -1102,7 +1333,6 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
 
   const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
 
-  // Aplicar SIEMPRE filtro de fechas + búsqueda (para ambas tabs)
   const dateFiltered = useMemo(() => {
     return facturas.filter((f) => {
       const fechaInv = dateFromInv(f);
@@ -1120,7 +1350,6 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
     });
   }, [facturas, dateFrom, dateTo, search]);
 
-  // Filtro adicional de la tab Facturas (pendientes/causadas/todas)
   const filtered = useMemo(() => {
     return dateFiltered.filter((f) => {
       const causada = causadas.has(f.cufe) || f.estado === "CAUSADA";
@@ -1130,7 +1359,6 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
     });
   }, [dateFiltered, filter, causadas]);
 
-  // Stats para la tab Facturas
   const stats = useMemo(() => {
     const aprobadas = facturas.filter(isApproved);
     const pendientes = aprobadas.filter((f) => !causadas.has(f.cufe) && f.estado !== "CAUSADA");
@@ -1139,16 +1367,9 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
     return { pendientes: pendientes.length, causadas: causadasArr.length, total: aprobadas.length, totalMonto };
   }, [facturas, filtered, causadas]);
 
-  // ⭐ Stats para DASHBOARD (incluye filtro de fechas + búsqueda, NO filtra por pendientes/causadas)
-  const dashboardStats = useMemo(
-    () => computeDashboardStats(dateFiltered, causadas, dateFrom, dateTo),
-    [dateFiltered, causadas, dateFrom, dateTo]
-  );
+  const dashboardStats = useMemo(() => computeDashboardStats(dateFiltered, causadas, dateFrom, dateTo), [dateFiltered, causadas, dateFrom, dateTo]);
 
-  // Propagar dashboardStats al asistente
-  useEffect(() => {
-    if (onContextChange) onContextChange({ dashboardStats });
-  }, [dashboardStats]);
+  useEffect(() => { if (onContextChange) onContextChange({ dashboardStats }); }, [dashboardStats]);
 
   const quickDate = (dias) => {
     const hasta = new Date();
@@ -1160,9 +1381,13 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
 
   const noFacturasForEmpresa = !loading && !error && facturas.length === 0;
 
+  // Etiqueta que muestra quién está logueado
+  const userBadge = isSubUser
+    ? `👤 ${session.nombre || session.email} · Usuario`
+    : `🏢 Admin · ${session.correo}`;
+
   return (
     <div style={{ minHeight: "100vh" }}>
-      {/* Header */}
       <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "18px 24px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
           <div>
@@ -1171,12 +1396,20 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
             {session.empresa && session.empresa !== session.correo && (
               <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600, marginTop: 6 }}>{session.empresa}</div>
             )}
-            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>NIT {session.nit} · {session.software_contable} · {session.correo}</div>
+            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>NIT {session.nit} · {session.software_contable} · {userBadge}</div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <button onClick={() => setShowSettings(true)} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: credentials ? "#10b981" : "transparent", color: credentials ? "#fff" : "#94a3b8", border: `1px solid ${credentials ? "#10b981" : "#334155"}` }}>
-              {credentials ? "✓ APIs conectadas" : "⚙ Conectar APIs"}
-            </button>
+            {/* ⭐ Solo master puede conectar APIs y gestionar usuarios */}
+            {isMaster && (
+              <button onClick={() => setShowSettings(true)} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: credentials ? "#10b981" : "transparent", color: credentials ? "#fff" : "#94a3b8", border: `1px solid ${credentials ? "#10b981" : "#334155"}` }}>
+                {credentials ? "✓ APIs conectadas" : "⚙ Conectar APIs"}
+              </button>
+            )}
+            {isMaster && (
+              <button onClick={() => setShowSubUsers(true)} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
+                👥 Usuarios
+              </button>
+            )}
             <button onClick={onChangePassword} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
               🔒 Cambiar contraseña
             </button>
@@ -1194,7 +1427,6 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
           </div>
         ) : (
           <React.Fragment>
-            {/* ⭐ TABS */}
             <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "2px solid #e2e8f0", paddingBottom: 0 }}>
               {[
                 { key: "facturas", label: "📋 Facturas" },
@@ -1212,7 +1444,6 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
 
             {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#991b1b" }}>{error}</div>}
 
-            {/* Filtros compartidos (fechas + búsqueda + refresh) */}
             <div style={{ background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e2e8f0", marginBottom: 12 }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {activeTab === "facturas" && [
@@ -1227,9 +1458,7 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
                     border: `1px solid ${filter === f.key ? "#0f172a" : "#e2e8f0"}`,
                   }}>{f.label}</button>
                 ))}
-
                 {activeTab === "facturas" && <div style={{ width: 1, height: 24, background: "#e2e8f0", margin: "0 4px" }} />}
-
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>📅 Desde:</span>
                   <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12 }} />
@@ -1239,7 +1468,6 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
                     <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11, cursor: "pointer", color: "#64748b" }}>✕</button>
                   )}
                 </div>
-
                 {activeTab === "facturas" && (
                   <input type="text" placeholder="Buscar factura, emisor, CUFE..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 240 }} />
                 )}
@@ -1253,17 +1481,14 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
               <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, alignSelf: "center" }}>ATAJOS:</span>
                 {[
-                  { d: 7, l: "Últimos 7 días" },
-                  { d: 30, l: "Últimos 30 días" },
-                  { d: 90, l: "Últimos 3 meses" },
-                  { d: 365, l: "Último año" },
+                  { d: 7, l: "Últimos 7 días" }, { d: 30, l: "Últimos 30 días" },
+                  { d: 90, l: "Últimos 3 meses" }, { d: 365, l: "Último año" },
                 ].map(q => (
                   <button key={q.d} onClick={() => quickDate(q.d)} style={{ padding: "4px 10px", borderRadius: 12, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, cursor: "pointer", color: "#475569" }}>{q.l}</button>
                 ))}
               </div>
             </div>
 
-            {/* ⭐ Contenido según tab activa */}
             {activeTab === "facturas" && (
               <React.Fragment>
                 <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
@@ -1291,9 +1516,7 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
                                 <div style={{ fontSize: 14, fontWeight: 700 }}>{inv.numero_factura}</div>
                                 {inv.categoria && <span style={{ fontSize: 9, background: "#ede9fe", color: "#6d28d9", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>{inv.categoria}</span>}
                               </div>
-                              <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {inv.emisor} · {dateStr(inv.fecha_aprobacion)}
-                              </div>
+                              <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.emisor} · {dateStr(inv.fecha_aprobacion)}</div>
                             </div>
                             <div style={{ textAlign: "right", minWidth: 110 }}>
                               <div style={{ fontSize: 14, fontWeight: 700 }}>{fmt(inv.total)}</div>
@@ -1318,7 +1541,7 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
         )}
       </div>
 
-      {showSettings && (
+      {showSettings && isMaster && (
         <ApiSettingsModal session={session} credentials={credentials} onClose={() => setShowSettings(false)}
           onSave={async (creds) => {
             try {
@@ -1347,6 +1570,10 @@ function Dashboard({ session, onLogout, onContextChange, onChangePassword }) {
             } catch (e) { alert("⚠ Error: " + e.message); }
           }}
         />
+      )}
+
+      {showSubUsers && isMaster && (
+        <SubUsersModal session={session} onClose={() => setShowSubUsers(false)} />
       )}
     </div>
   );
@@ -1389,7 +1616,9 @@ function App() {
       onSuccess={() => { setForcedChangeCtx(null); setView("login"); alert("✓ Contraseña actualizada. Inicia sesión con tu nueva contraseña."); }}
       onCancel={() => {}} />;
   } else if (view === "change_voluntary" && session) {
-    screen = <ChangePasswordScreen mode="voluntary" nit={session.nit}
+    // ⭐ Si es sub-usuario, el modo es "sub_user" (requiere aprobación del master)
+    const mode = session.role === "sub_user" ? "sub_user" : "voluntary";
+    screen = <ChangePasswordScreen mode={mode} session={session} nit={session.nit}
       onSuccess={() => { setView("dashboard"); alert("✓ Contraseña actualizada correctamente."); }}
       onCancel={() => setView("dashboard")} />;
   } else if (view === "dashboard" && session) {
