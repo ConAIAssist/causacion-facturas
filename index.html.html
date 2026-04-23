@@ -417,16 +417,45 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
         if (!data.success) { setError(data.error || "No se pudo enviar la solicitud"); setLoading(false); return; }
         setSubmittedPending(true);
       } else {
+        // ⭐ Modo forzado (change_token): sin JWT, endpoint usa la rama IF bypass
+        // ⭐ Modo voluntario: requiere JWT Authorization header + rate limit
         const payload = { nit, newPassword };
-        if (isForced) payload.change_token = changeToken;
-        else payload.currentPassword = currentPassword;
+        const headers = { "Content-Type": "application/json" };
+        if (isForced) {
+          payload.change_token = changeToken;
+          // No Authorization header — la rama IF del backend hace bypass del JWT
+        } else {
+          payload.currentPassword = currentPassword;
+          // Modo voluntario: incluir JWT para pasar la chain Leer Secrets13 → Verificar JWT → Rate Limit
+          if (session?.access_token) {
+            headers["Authorization"] = `Bearer ${session.access_token}`;
+          }
+        }
         const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers,
           body: JSON.stringify(payload),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // Si el servidor rechaza el JWT (401 o body vacío = bloqueo/expiración)
+        if (res.status === 401) {
+          setError("Tu sesión expiró. Inicia sesión de nuevo.");
+          setLoading(false);
+          setTimeout(() => onCancel(), 1500);
+          return;
+        }
         const text = await res.text();
-        const data = text ? JSON.parse(text) : { success: false, error: "Respuesta vacía" };
+        if (!text) {
+          // Body vacío puede ser: JWT bloqueado, rate limit, o error interno
+          if (isForced) {
+            setError("No se pudo cambiar la contraseña. El token puede haber expirado.");
+          } else {
+            setError("Sesión inválida o demasiados intentos. Intenta iniciar sesión de nuevo.");
+            setTimeout(() => onCancel(), 2000);
+          }
+          setLoading(false);
+          return;
+        }
+        const data = JSON.parse(text);
         if (!data.success) { setError(data.error || "No se pudo cambiar la contraseña"); setLoading(false); return; }
         onSuccess();
       }
