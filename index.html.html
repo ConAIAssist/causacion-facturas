@@ -503,6 +503,10 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
     if (strengthErr) { setError(strengthErr); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
     if ((isSubUser || !isForced) && !currentPassword) { setError("Ingresa tu contraseña actual"); return; }
+    // ⭐ Nueva password debe ser diferente de la actual (solo aplica cuando hay currentPassword)
+    if ((isSubUser || !isForced) && currentPassword && newPassword === currentPassword) {
+      setError("La nueva contraseña debe ser diferente a la actual"); return;
+    }
     setLoading(true);
     try {
       if (isSubUser) {
