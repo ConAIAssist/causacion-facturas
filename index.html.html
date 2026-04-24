@@ -9,7 +9,7 @@
 <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
 <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js" onerror="this.onerror=null; var s=document.createElement('script'); s.src='https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js'; document.head.appendChild(s);"></script>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #0f172a; }
@@ -673,11 +673,47 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
   useEffect(() => {
-    if (step === "qr" && enrollData && qrCanvasRef.current && window.QRCode) {
-      window.QRCode.toCanvas(qrCanvasRef.current, enrollData.otpauth_uri, {
-        width: 220, margin: 1, color: { dark: "#0f172a", light: "#ffffff" },
-      }, (err) => { if (err) console.error("QR error:", err); });
-    }
+const [qrError, setQrError] = useState("");
+  const [qrReady, setQrReady] = useState(false);
+  useEffect(() => {
+    if (step !== "qr" || !enrollData || !enrollData.otpauth_uri) return;
+    setQrError("");
+    setQrReady(false);
+    let attempts = 0;
+    const maxAttempts = 40; // 40 × 100ms = 4 segundos máx esperando al CDN
+    const tryRender = () => {
+      attempts++;
+      const canvas = qrCanvasRef.current;
+      if (!canvas) {
+        if (attempts < maxAttempts) return setTimeout(tryRender, 100);
+        setQrError("Canvas no disponible.");
+        return;
+      }
+      if (!window.QRCode || !window.QRCode.toCanvas) {
+        if (attempts < maxAttempts) return setTimeout(tryRender, 100);
+        setQrError("La librería QR no cargó. Verifica tu conexión o usa el código manual abajo.");
+        return;
+      }
+      try {
+        window.QRCode.toCanvas(
+          canvas,
+          enrollData.otpauth_uri,
+          { width: 220, margin: 1, color: { dark: "#0f172a", light: "#ffffff" } },
+          (err) => {
+            if (err) {
+              console.error("QR error:", err);
+              setQrError("Error generando QR: " + err.message + ". Usa el código manual abajo.");
+            } else {
+              setQrReady(true);
+            }
+          }
+        );
+      } catch (e) {
+        console.error("QR exception:", e);
+        setQrError("Error generando QR: " + e.message + ". Usa el código manual abajo.");
+      }
+    };
+    tryRender();
   }, [step, enrollData]);
   const confirmEnrollment = async (e) => {
     if (e) e.preventDefault();
@@ -750,8 +786,18 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
   if (step === "qr") {
     return (
       <AuthLayout title="📱 Escanea el código QR" subtitle="Abre tu app de autenticación y escanea este código">
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 16, padding: 12, background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0" }}>
-          <canvas ref={qrCanvasRef} />
+       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 16, padding: 12, background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", minHeight: 240 }}>
+          <canvas ref={qrCanvasRef} style={{ display: qrReady ? "block" : "none" }} />
+          {!qrReady && !qrError && (
+            <div style={{ color: "#64748b", fontSize: 12, padding: 80 }}>
+              <span className="spin">⟳</span> Generando QR...
+            </div>
+          )}
+          {qrError && (
+            <div style={{ color: "#991b1b", fontSize: 11, textAlign: "center", padding: "20px 12px", lineHeight: 1.5 }}>
+              ⚠ {qrError}
+            </div>
+          )}
         </div>
         <div style={{ fontSize: 11, color: "#64748b", textAlign: "center", marginBottom: 8 }}>
           ¿No puedes escanear? Ingresa este código manualmente:
