@@ -651,7 +651,6 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
   const [backupCodes, setBackupCodes] = useState([]);
   const qrContainerRef = useRef(null);
   const [qrError, setQrError] = useState("");
-
   const startEnrollment = async () => {
     setLoading(true); setError("");
     try {
@@ -674,7 +673,6 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
       setStep("qr");
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
-
   useEffect(() => {
     if (step !== "qr" || !enrollData || !enrollData.otpauth_uri) return;
     setQrError("");
@@ -697,11 +695,7 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
         const qr = window.qrcode(0, "M");
         qr.addData(enrollData.otpauth_uri);
         qr.make();
-        container.innerHTML = qr.createSvgTag({
-          cellSize: 6,
-          margin: 2,
-          scalable: true,
-        });
+        container.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
         const svg = container.querySelector("svg");
         if (svg) {
           svg.setAttribute("width", "220");
@@ -715,7 +709,6 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
     };
     tryRender();
   }, [step, enrollData]);
-
   const confirmEnrollment = async (e) => {
     if (e) e.preventDefault();
     if (!/^\d{6}$/.test(code)) { setError("Ingresa los 6 dígitos del código"); return; }
@@ -740,7 +733,6 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
       setStep("backup");
     } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
-
   const copyBackupCodes = () => {
     const text = `Códigos de respaldo 2FA\nNIT: ${nit}\nUsuario: ${userId}\nFecha: ${new Date().toLocaleString("es-CO")}\n\n${backupCodes.join("\n")}\n\n⚠️ Guárdalos en un lugar seguro. Cada código solo sirve una vez.`;
     navigator.clipboard.writeText(text).then(
@@ -748,7 +740,6 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
       () => alert("No se pudo copiar. Selecciona y copia manualmente.")
     );
   };
-
   const downloadBackupCodes = () => {
     const text = `Códigos de respaldo 2FA\nNIT: ${nit}\nUsuario: ${userId}\nFecha: ${new Date().toLocaleString("es-CO")}\n\n${backupCodes.join("\n")}\n\n⚠️ Guárdalos en un lugar seguro. Cada código solo sirve una vez.`;
     const blob = new Blob([text], { type: "text/plain" });
@@ -757,7 +748,6 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
     a.href = url; a.download = `2fa-backup-${nit}-${Date.now()}.txt`; a.click();
     URL.revokeObjectURL(url);
   };
-
   if (step === "intro") {
     return (
       <AuthLayout title="🛡 Configura 2FA" subtitle="La autenticación en dos pasos es obligatoria para acceder al sistema">
@@ -787,7 +777,6 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
       </AuthLayout>
     );
   }
-
   if (step === "qr") {
     return (
       <AuthLayout title="📱 Escanea el código QR" subtitle="Abre tu app de autenticación y escanea este código">
@@ -820,7 +809,6 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
       </AuthLayout>
     );
   }
-
   // step === "backup"
   return (
     <AuthLayout title="🔑 Códigos de respaldo" subtitle="Guárdalos: son tu única forma de recuperar acceso si pierdes el teléfono">
