@@ -9,6 +9,7 @@
 <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
 <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #0f172a; }
@@ -22,14 +23,12 @@
 </head>
 <body>
 <div id="root"></div>
-
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useMemo, useRef } = React;
 const {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area,
 } = window.Recharts;
-
 const CONFIG = {
   LOGIN_URL:    "https://conaiassist.app.n8n.cloud/webhook/api/login",
   FACTURAS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/facturas",
@@ -42,14 +41,21 @@ const CONFIG = {
   CHANGE_PASSWORD_URL: "https://conaiassist.app.n8n.cloud/webhook/api/change-password",
   REQUEST_RESET_URL: "https://conaiassist.app.n8n.cloud/webhook/api/request-password-reset",
   RESET_PASSWORD_URL: "https://conaiassist.app.n8n.cloud/webhook/api/reset-password",
-  // ⭐ Nuevos endpoints para sub-usuarios
+  // ⭐ Endpoints para sub-usuarios (Fase 1)
   SUB_USER_LOGIN_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-user-login",
   SUB_USERS_LIST_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/list",
   SUB_USERS_CREATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/create",
   SUB_USERS_DELETE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/delete",
   SUB_USER_REQUEST_PW_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/request-password-change",
+  // ⭐ NUEVOS endpoints 2FA (Fase 2)
+  TWOFA_ENROLL_START_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/enroll/start",
+  TWOFA_ENROLL_CONFIRM_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/enroll/confirm",
+  TWOFA_VERIFY_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/verify",
+  TWOFA_DISABLE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/disable",
+  TWOFA_RECOVERY_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/recovery",
+  TWOFA_STATUS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/status",
+  TWOFA_RESET_SUBUSER_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/reset-subuser",
 };
-
 const SOFTWARE_API_URLS = {
   Siigo: "https://api.siigo.com",
   Alegra: "https://api.alegra.com",
@@ -59,7 +65,6 @@ const SOFTWARE_API_URLS = {
   "World Office": "https://api.worldoffice.cloud",
   Odoo: "https://tuinstancia.odoo.com",
 };
-
 const CHART_COLORS = {
   primary: "#0f172a",
   pendiente: "#f59e0b",
@@ -73,7 +78,6 @@ const CHART_COLORS = {
   reteica: "#f97316",
   palette: ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#ef4444", "#6366f1"],
 };
-
 // ═══════════════════════════════════════════════════════════════
 // UTILIDADES
 // ═══════════════════════════════════════════════════════════════
@@ -105,12 +109,10 @@ function weekStart(d) {
   const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
   return new Date(dt.setDate(diff));
 }
-
 // ═══════════════════════════════════════════════════════════════
 // ⭐ PASSWORD STRENGTH — validación compartida (debe coincidir con backend)
 // ═══════════════════════════════════════════════════════════════
 const PASSWORD_SPECIAL_REGEX = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/;
-
 function checkPasswordRules(password, opts) {
   opts = opts || {};
   const rules = {
@@ -144,7 +146,6 @@ function checkPasswordRules(password, opts) {
   }
   return rules;
 }
-
 function checkPasswordStrength(password, opts) {
   if (!password) return "La contraseña es requerida";
   const rules = checkPasswordRules(password, opts);
@@ -158,7 +159,6 @@ function checkPasswordStrength(password, opts) {
   if (!rules.noPersonal) return "No puede contener el NIT ni parte de tu correo";
   return null;
 }
-
 function PasswordStrengthHint({ password, opts }) {
   if (!password) {
     return (
@@ -182,7 +182,6 @@ function PasswordStrengthHint({ password, opts }) {
   else if (passedCount < 5) { strengthLevel = 0.5; strengthColor = "#f59e0b"; strengthLabel = "Media"; }
   else if (!extraOk) { strengthLevel = 0.75; strengthColor = "#f59e0b"; strengthLabel = "Casi"; }
   else { strengthLevel = 1; strengthColor = "#16a34a"; strengthLabel = "Fuerte"; }
-
   return (
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -211,7 +210,6 @@ function PasswordStrengthHint({ password, opts }) {
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
 // AUTH LAYOUT
 // ═══════════════════════════════════════════════════════════════
@@ -229,16 +227,14 @@ function AuthLayout({ title, subtitle, children }) {
     </div>
   );
 }
-
-// ⭐ Nuevo LoginScreen con toggle master / sub-user
-function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
-  const [loginType, setLoginType] = useState("master"); // "master" | "sub_user"
+// ⭐ LoginScreen con toggle master/sub-user + soporte 2FA (Fase 2)
+function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onRequire2FA, onRequire2FAEnrollment }) {
+  const [loginType, setLoginType] = useState("master");
   const [nit, setNit] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -248,6 +244,7 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
     if (!password) { setError("Ingresa tu contraseña"); return; }
     setLoading(true);
     try {
+      let data;
       if (loginType === "master") {
         const res = await fetch(CONFIG.LOGIN_URL, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -255,33 +252,62 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
         });
         if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
         const text = await res.text();
-        const data = text ? JSON.parse(text) : { valid: false, error: "NIT o contraseña incorrectos" };
-        if (!data.valid) { setError(data.error || "NIT o contraseña incorrectos"); setLoading(false); return; }
-        if (data.requires_password_change) {
-          onRequirePasswordChange({ nit: nitLimpio, change_token: data.change_token });
-          setLoading(false); return;
-        }
-        onLogin({ ...data, nit: nitLimpio, role: "master" });
+        data = text ? JSON.parse(text) : { valid: false, error: "NIT o contraseña incorrectos" };
       } else {
-        // Login sub-usuario
         const res = await fetch(CONFIG.SUB_USER_LOGIN_URL, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ nit: nitLimpio, email: email.trim().toLowerCase(), password }),
         });
         if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
         const text = await res.text();
-        const data = text ? JSON.parse(text) : { valid: false, error: "Credenciales inválidas" };
-        if (!data.valid) { setError(data.error || "Credenciales inválidas"); setLoading(false); return; }
-        onLogin({ ...data, nit: nitLimpio, role: "sub_user" });
+        data = text ? JSON.parse(text) : { valid: false, error: "Credenciales inválidas" };
       }
+      if (!data.valid) {
+        setError(data.error || (loginType === "master" ? "NIT o contraseña incorrectos" : "Credenciales inválidas"));
+        setLoading(false);
+        return;
+      }
+      // ⭐ Password change forzado (contraseña temporal)
+      if (data.requires_password_change) {
+        onRequirePasswordChange({ nit: nitLimpio, change_token: data.change_token });
+        setLoading(false);
+        return;
+      }
+      // ⭐ 2FA enrollment obligatorio (sin 2FA configurado aún)
+      if (data.requires_2fa_enrollment) {
+        onRequire2FAEnrollment({
+          enrollmentJwt: data.enrollment_jwt,
+          nit: nitLimpio,
+          userId: data.user_id,
+          userType: data.user_type || (loginType === "master" ? "master" : "sub_user"),
+          empresa: data.empresa || null,
+          nombre: data.nombre || null,
+          correo: data.correo || (loginType === "sub_user" ? email.trim().toLowerCase() : null),
+          softwareContable: data.software_contable || null,
+          actividad: data.actividad || null,
+          credentials: data.credentials || null,
+        });
+        setLoading(false);
+        return;
+      }
+      // ⭐ 2FA verificación (ya tiene 2FA activo)
+      if (data.requires_2fa) {
+        onRequire2FA({
+          pendingToken: data.pending_token,
+          expiresAt: data.expires_at,
+          nit: nitLimpio,
+          loginType: loginType,
+        });
+        setLoading(false);
+        return;
+      }
+      // Login directo (no debería ocurrir con 2FA obligatorio, fallback por si acaso)
+      onLogin({ ...data, nit: nitLimpio, role: loginType === "master" ? "master" : "sub_user" });
     } catch (err) { setError(err.message); setLoading(false); }
   };
-
   const canSubmit = nit && password && (loginType === "master" || email);
-
   return (
     <AuthLayout title="Causación de Facturas" subtitle={loginType === "master" ? "Inicia sesión con el NIT de tu empresa" : "Inicia sesión con tu cuenta de usuario"}>
-      {/* Toggle de tipo de login */}
       <div style={{ display: "flex", gap: 0, marginBottom: 18, background: "#f1f5f9", padding: 4, borderRadius: 10 }}>
         <button type="button" onClick={() => { setLoginType("master"); setError(""); }} disabled={loading} style={{
           flex: 1, padding: "8px 12px", border: "none", borderRadius: 8, fontSize: 11, fontWeight: 700,
@@ -300,7 +326,6 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
           fontFamily: "inherit",
         }}>👤 Usuario</button>
       </div>
-
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
@@ -308,7 +333,6 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
           <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Solo números, sin dígito de verificación</div>
         </div>
-
         {loginType === "sub_user" && (
           <div style={{ marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CORREO ELECTRÓNICO</label>
@@ -316,7 +340,6 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
               style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
           </div>
         )}
-
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONTRASEÑA</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" disabled={loading}
@@ -342,14 +365,12 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange }) {
     </AuthLayout>
   );
 }
-
 function ForgotPasswordScreen({ onBack }) {
   const [nit, setNit] = useState("");
   const [correo, setCorreo] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -367,7 +388,6 @@ function ForgotPasswordScreen({ onBack }) {
     } catch (err) { setError("No se pudo procesar la solicitud. Intenta de nuevo más tarde."); }
     finally { setLoading(false); }
   };
-
   if (submitted) {
     return (
       <AuthLayout title="Revisa tu correo" subtitle="Si los datos coinciden con una cuenta registrada, recibirás un email con instrucciones para restablecer tu contraseña.">
@@ -383,7 +403,6 @@ function ForgotPasswordScreen({ onBack }) {
       </AuthLayout>
     );
   }
-
   return (
     <AuthLayout title="Restablecer contraseña" subtitle="Ingresa tu NIT y el correo de la empresa para recibir un enlace">
       <form onSubmit={handleSubmit}>
@@ -406,18 +425,15 @@ function ForgotPasswordScreen({ onBack }) {
     </AuthLayout>
   );
 }
-
 function ResetPasswordScreen({ token, onSuccess }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    // ⭐ Validación de fortaleza alineada con el backend (12+ chars, complejidad, etc.)
     const strengthErr = checkPasswordStrength(newPassword);
     if (strengthErr) { setError(strengthErr); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
@@ -438,7 +454,6 @@ function ResetPasswordScreen({ token, onSuccess }) {
       setSuccess(true);
     } catch (err) { setError(err.message); setLoading(false); }
   };
-
   if (success) {
     return (
       <AuthLayout title="¡Contraseña restablecida!" subtitle="Ya puedes iniciar sesión con tu nueva contraseña">
@@ -451,7 +466,6 @@ function ResetPasswordScreen({ token, onSuccess }) {
       </AuthLayout>
     );
   }
-
   return (
     <AuthLayout title="Nueva contraseña" subtitle="Ingresa tu nueva contraseña para completar el restablecimiento">
       <form onSubmit={handleSubmit}>
@@ -480,9 +494,7 @@ function ResetPasswordScreen({ token, onSuccess }) {
     </AuthLayout>
   );
 }
-
-// ⭐ ChangePasswordScreen modificado: incluye modo "sub_user" que requiere aprobación
-// ⭐ Ahora recibe 'session' en modo sub_user para incluir JWT Authorization header
+// ⭐ ChangePasswordScreen (Fase 1) — sin cambios
 function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCancel }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -490,42 +502,28 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [submittedPending, setSubmittedPending] = useState(false);
-
   const isForced = mode === "forced";
   const isSubUser = mode === "sub_user";
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    // ⭐ Validación de fortaleza alineada con el backend (12+ chars, complejidad, etc.)
     const strengthOpts = { nit: session?.nit || nit, email: session?.correo || session?.email };
     const strengthErr = checkPasswordStrength(newPassword, strengthOpts);
     if (strengthErr) { setError(strengthErr); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
     if ((isSubUser || !isForced) && !currentPassword) { setError("Ingresa tu contraseña actual"); return; }
-    // ⭐ Nueva password debe ser diferente de la actual (solo aplica cuando hay currentPassword)
     if ((isSubUser || !isForced) && currentPassword && newPassword === currentPassword) {
       setError("La nueva contraseña debe ser diferente a la actual"); return;
     }
     setLoading(true);
     try {
       if (isSubUser) {
-        // ⭐ Endpoint protegido: incluye Authorization header con JWT
         const headers = { "Content-Type": "application/json" };
-        if (session?.access_token) {
-          headers["Authorization"] = `Bearer ${session.access_token}`;
-        }
+        if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
         const res = await fetch(CONFIG.SUB_USER_REQUEST_PW_URL, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            nit: session.nit,
-            user_id: session.user_id,
-            currentPassword,
-            newPassword,
-          }),
+          method: "POST", headers,
+          body: JSON.stringify({ nit: session.nit, user_id: session.user_id, currentPassword, newPassword }),
         });
-        // Si el servidor rechaza el JWT (401 o body vacío = bloqueo/expiración)
         if (res.status === 401) {
           setError("Tu sesión expiró. Inicia sesión de nuevo.");
           setLoading(false);
@@ -543,26 +541,18 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
         if (!data.success) { setError(data.error || "No se pudo enviar la solicitud"); setLoading(false); return; }
         setSubmittedPending(true);
       } else {
-        // ⭐ Modo forzado (change_token): sin JWT, endpoint usa la rama IF bypass
-        // ⭐ Modo voluntario: requiere JWT Authorization header + rate limit
         const payload = { nit, newPassword };
         const headers = { "Content-Type": "application/json" };
         if (isForced) {
           payload.change_token = changeToken;
-          // No Authorization header — la rama IF del backend hace bypass del JWT
         } else {
           payload.currentPassword = currentPassword;
-          // Modo voluntario: incluir JWT para pasar la chain Leer Secrets13 → Verificar JWT → Rate Limit
-          if (session?.access_token) {
-            headers["Authorization"] = `Bearer ${session.access_token}`;
-          }
+          if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
         }
         const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
-          method: "POST",
-          headers,
+          method: "POST", headers,
           body: JSON.stringify(payload),
         });
-        // Si el servidor rechaza el JWT (401 o body vacío = bloqueo/expiración)
         if (res.status === 401) {
           setError("Tu sesión expiró. Inicia sesión de nuevo.");
           setLoading(false);
@@ -571,7 +561,6 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
         }
         const text = await res.text();
         if (!text) {
-          // Body vacío puede ser: JWT bloqueado, rate limit, o error interno
           if (isForced) {
             setError("No se pudo cambiar la contraseña. El token puede haber expirado.");
           } else {
@@ -587,7 +576,6 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
       }
     } catch (err) { setError(err.message); setLoading(false); }
   };
-
   if (submittedPending) {
     return (
       <AuthLayout title="Solicitud enviada" subtitle="Tu administrador recibirá un correo para aprobar el cambio">
@@ -603,19 +591,10 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
       </AuthLayout>
     );
   }
-
   let title, subtitle;
-  if (isForced) {
-    title = "Cambia tu contraseña";
-    subtitle = "Por seguridad, debes cambiar la contraseña temporal antes de continuar";
-  } else if (isSubUser) {
-    title = "Solicitar cambio de contraseña";
-    subtitle = "Como usuario, el cambio requiere aprobación del administrador de tu empresa";
-  } else {
-    title = "Cambiar contraseña";
-    subtitle = "Ingresa tu contraseña actual y la nueva";
-  }
-
+  if (isForced) { title = "Cambia tu contraseña"; subtitle = "Por seguridad, debes cambiar la contraseña temporal antes de continuar"; }
+  else if (isSubUser) { title = "Solicitar cambio de contraseña"; subtitle = "Como usuario, el cambio requiere aprobación del administrador de tu empresa"; }
+  else { title = "Cambiar contraseña"; subtitle = "Ingresa tu contraseña actual y la nueva"; }
   return (
     <AuthLayout title={title} subtitle={subtitle}>
       {isSubUser && (
@@ -659,10 +638,393 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
     </AuthLayout>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
-// ⭐ MODAL DE GESTIÓN DE SUB-USUARIOS (solo master)
-// Ahora recibe authFetch para usar JWT
+// ⭐ ENROLLMENT SCREEN (Fase 2) — configuración inicial 2FA
+// ═══════════════════════════════════════════════════════════════
+function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
+  const { enrollmentJwt, nit, userId } = ctx;
+  const [step, setStep] = useState("intro");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [enrollData, setEnrollData] = useState(null);
+  const [code, setCode] = useState("");
+  const [backupCodes, setBackupCodes] = useState([]);
+  const qrCanvasRef = useRef(null);
+  const startEnrollment = async () => {
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(CONFIG.TWOFA_ENROLL_START_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${enrollmentJwt}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ nit }),
+      });
+      if (res.status === 401) {
+        setError("Tu sesión de configuración expiró. Vuelve a iniciar sesión.");
+        setLoading(false);
+        setTimeout(() => onCancel(), 2000);
+        return;
+      }
+      const text = await res.text();
+      if (!text) { setError("Respuesta vacía del servidor. Posible rate limit."); setLoading(false); return; }
+      const data = JSON.parse(text);
+      if (!data.success) { setError(data.error || "No se pudo iniciar el enrolamiento"); setLoading(false); return; }
+      setEnrollData(data);
+      setStep("qr");
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
+  };
+  useEffect(() => {
+    if (step === "qr" && enrollData && qrCanvasRef.current && window.QRCode) {
+      window.QRCode.toCanvas(qrCanvasRef.current, enrollData.otpauth_uri, {
+        width: 220, margin: 1, color: { dark: "#0f172a", light: "#ffffff" },
+      }, (err) => { if (err) console.error("QR error:", err); });
+    }
+  }, [step, enrollData]);
+  const confirmEnrollment = async (e) => {
+    if (e) e.preventDefault();
+    if (!/^\d{6}$/.test(code)) { setError("Ingresa los 6 dígitos del código"); return; }
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(CONFIG.TWOFA_ENROLL_CONFIRM_URL, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${enrollmentJwt}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ nit, enrollment_token: enrollData.enrollment_token, code }),
+      });
+      if (res.status === 401) {
+        setError("Tu sesión expiró.");
+        setLoading(false);
+        setTimeout(() => onCancel(), 2000);
+        return;
+      }
+      const text = await res.text();
+      if (!text) { setError("Respuesta vacía del servidor"); setLoading(false); return; }
+      const data = JSON.parse(text);
+      if (!data.success) { setError(data.error || "Código incorrecto"); setLoading(false); return; }
+      setBackupCodes(data.backup_codes || []);
+      setStep("backup");
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
+  };
+  const copyBackupCodes = () => {
+    const text = `Códigos de respaldo 2FA\nNIT: ${nit}\nUsuario: ${userId}\nFecha: ${new Date().toLocaleString("es-CO")}\n\n${backupCodes.join("\n")}\n\n⚠️ Guárdalos en un lugar seguro. Cada código solo sirve una vez.`;
+    navigator.clipboard.writeText(text).then(
+      () => alert("✓ Copiados al portapapeles"),
+      () => alert("No se pudo copiar. Selecciona y copia manualmente.")
+    );
+  };
+  const downloadBackupCodes = () => {
+    const text = `Códigos de respaldo 2FA\nNIT: ${nit}\nUsuario: ${userId}\nFecha: ${new Date().toLocaleString("es-CO")}\n\n${backupCodes.join("\n")}\n\n⚠️ Guárdalos en un lugar seguro. Cada código solo sirve una vez.`;
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `2fa-backup-${nit}-${Date.now()}.txt`; a.click();
+    URL.revokeObjectURL(url);
+  };
+  if (step === "intro") {
+    return (
+      <AuthLayout title="🛡 Configura 2FA" subtitle="La autenticación en dos pasos es obligatoria para acceder al sistema">
+        <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: 16, marginBottom: 16, fontSize: 12, color: "#0c4a6e", lineHeight: 1.6 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>¿Por qué 2FA?</div>
+          Aunque alguien conozca tu contraseña, no podrá entrar sin el código de 6 dígitos que genera tu teléfono.
+        </div>
+        <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6, marginBottom: 14 }}>
+          <div style={{ marginBottom: 8 }}><strong>Paso 1:</strong> Instala una app de autenticación en tu teléfono</div>
+          <ul style={{ margin: "0 0 12px 20px", padding: 0 }}>
+            <li>Google Authenticator</li>
+            <li>Microsoft Authenticator</li>
+            <li>Authy</li>
+            <li>1Password</li>
+          </ul>
+          <div><strong>Paso 2:</strong> Escanea el QR que aparecerá a continuación</div>
+          <div><strong>Paso 3:</strong> Confirma con el primer código generado</div>
+          <div><strong>Paso 4:</strong> Guarda los 8 códigos de respaldo (por si pierdes el teléfono)</div>
+        </div>
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+        <button onClick={startEnrollment} disabled={loading} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", marginBottom: 8 }}>
+          {loading ? <span><span className="spin">⟳</span> Preparando...</span> : "Comenzar configuración"}
+        </button>
+        <button onClick={onCancel} disabled={loading} style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", color: "#475569", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          Cancelar y cerrar sesión
+        </button>
+      </AuthLayout>
+    );
+  }
+  if (step === "qr") {
+    return (
+      <AuthLayout title="📱 Escanea el código QR" subtitle="Abre tu app de autenticación y escanea este código">
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 16, padding: 12, background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+          <canvas ref={qrCanvasRef} />
+        </div>
+        <div style={{ fontSize: 11, color: "#64748b", textAlign: "center", marginBottom: 8 }}>
+          ¿No puedes escanear? Ingresa este código manualmente:
+        </div>
+        <div style={{ fontFamily: "monospace", fontSize: 13, textAlign: "center", padding: "8px 12px", background: "#f8fafc", borderRadius: 6, border: "1px solid #e2e8f0", marginBottom: 16, wordBreak: "break-all", color: "#334155" }}>
+          {enrollData ? enrollData.secret : ""}
+        </div>
+        <form onSubmit={confirmEnrollment}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CÓDIGO DE 6 DÍGITOS</label>
+          <input type="text" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="123456" autoFocus disabled={loading} inputMode="numeric" autoComplete="one-time-code"
+            style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 22, fontFamily: "monospace", textAlign: "center", letterSpacing: "0.4em", marginBottom: 12 }} />
+          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+          <button type="submit" disabled={loading || code.length !== 6} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: loading || code.length !== 6 ? "#94a3b8" : "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: loading || code.length !== 6 ? "not-allowed" : "pointer" }}>
+            {loading ? <span><span className="spin">⟳</span> Verificando...</span> : "Confirmar"}
+          </button>
+        </form>
+      </AuthLayout>
+    );
+  }
+  // step === "backup"
+  return (
+    <AuthLayout title="🔑 Códigos de respaldo" subtitle="Guárdalos: son tu única forma de recuperar acceso si pierdes el teléfono">
+      <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 12, color: "#92400e", lineHeight: 1.5 }}>
+        ⚠ <strong>IMPORTANTE:</strong> Estos códigos se muestran UNA sola vez. Cópialos o descárgalos ahora. Cada código solo sirve una vez.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16, padding: 12, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+        {backupCodes.map((c, i) => (
+          <div key={i} style={{ fontFamily: "monospace", fontSize: 13, padding: "6px 10px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, textAlign: "center", color: "#0f172a", fontWeight: 600 }}>
+            {c}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button onClick={copyBackupCodes} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>📋 Copiar</button>
+        <button onClick={downloadBackupCodes} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>💾 Descargar .txt</button>
+      </div>
+      <button onClick={onSuccess} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#16a34a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+        ✓ Ya los guardé, iniciar sesión
+      </button>
+    </AuthLayout>
+  );
+}
+// ═══════════════════════════════════════════════════════════════
+// ⭐ TWO-FACTOR SCREEN (Fase 2) — verificación TOTP post-login
+// ═══════════════════════════════════════════════════════════════
+function TwoFactorScreen({ ctx, onSuccess, onCancel }) {
+  const { pendingToken, expiresAt } = ctx;
+  const [code, setCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [useBackup, setUseBackup] = useState(false);
+  const [backupCode, setBackupCode] = useState("");
+  const [secondsLeft, setSecondsLeft] = useState(300);
+  useEffect(() => {
+    const compute = () => {
+      const remaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+    };
+    compute();
+    const interval = setInterval(compute, 1000);
+    return () => clearInterval(interval);
+  }, [expiresAt]);
+  const submitTotp = async (e) => {
+    if (e) e.preventDefault();
+    if (!/^\d{6}$/.test(code)) { setError("Ingresa los 6 dígitos del código"); return; }
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(CONFIG.TWOFA_VERIFY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pending_token: pendingToken, code }),
+      });
+      const text = await res.text();
+      if (!text) throw new Error("Respuesta vacía del servidor");
+      const data = JSON.parse(text);
+      if (!data.success) {
+        setError(data.error || "Código incorrecto");
+        setCode("");
+        setLoading(false);
+        return;
+      }
+      onSuccess(data);
+    } catch (e) { setError(e.message); setLoading(false); }
+  };
+  const submitBackup = async (e) => {
+    if (e) e.preventDefault();
+    const cleaned = backupCode.toUpperCase().trim();
+    if (!/^[0-9A-F]{4}-[0-9A-F]{4}$/.test(cleaned)) { setError("Formato: XXXX-XXXX (solo letras A-F y números 0-9)"); return; }
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(CONFIG.TWOFA_RECOVERY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pending_token: pendingToken, backup_code: cleaned }),
+      });
+      const text = await res.text();
+      if (!text) throw new Error("Respuesta vacía del servidor");
+      const data = JSON.parse(text);
+      if (!data.success) { setError(data.error || "Código de respaldo inválido"); setLoading(false); return; }
+      alert("⚠ Login de emergencia exitoso. Tu 2FA fue desactivado. Deberás configurarlo de nuevo en tu próximo login.");
+      onSuccess(data);
+    } catch (e) { setError(e.message); setLoading(false); }
+  };
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = secondsLeft % 60;
+  const expired = secondsLeft === 0;
+  return (
+    <AuthLayout title="🔐 Código de verificación" subtitle={useBackup ? "Ingresa uno de tus códigos de respaldo" : "Ingresa el código de 6 dígitos de tu app"}>
+      {!expired && (
+        <div style={{ fontSize: 11, color: secondsLeft < 60 ? "#ef4444" : "#64748b", textAlign: "center", marginBottom: 12 }}>
+          Expira en {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+        </div>
+      )}
+      {expired && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12, textAlign: "center" }}>
+          ⏱ La sesión expiró. Vuelve a iniciar sesión.
+        </div>
+      )}
+      {!useBackup ? (
+        <form onSubmit={submitTotp}>
+          <input type="text" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="123456" autoFocus disabled={loading || expired} inputMode="numeric" autoComplete="one-time-code"
+            style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 24, fontFamily: "monospace", textAlign: "center", letterSpacing: "0.4em", marginBottom: 12 }} />
+          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+          <button type="submit" disabled={loading || code.length !== 6 || expired} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: loading || code.length !== 6 || expired ? "#94a3b8" : "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: loading || code.length !== 6 || expired ? "not-allowed" : "pointer", marginBottom: 10 }}>
+            {loading ? <span><span className="spin">⟳</span> Verificando...</span> : "Verificar"}
+          </button>
+          <button type="button" onClick={() => { setUseBackup(true); setError(""); setCode(""); }} disabled={loading || expired} style={{ width: "100%", padding: 10, borderRadius: 10, border: "none", background: "transparent", color: expired ? "#94a3b8" : "#0369a1", fontSize: 12, fontWeight: 600, cursor: expired ? "not-allowed" : "pointer", textDecoration: "underline", marginBottom: 6 }}>
+            ¿Perdiste tu dispositivo? Usar código de respaldo
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={submitBackup}>
+          <input type="text" value={backupCode} onChange={(e) => setBackupCode(e.target.value.toUpperCase())}
+            placeholder="XXXX-XXXX" autoFocus disabled={loading || expired} maxLength={9}
+            style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 18, fontFamily: "monospace", textAlign: "center", letterSpacing: "0.2em", marginBottom: 12, textTransform: "uppercase" }} />
+          <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, padding: "10px 14px", fontSize: 11, color: "#92400e", marginBottom: 12, lineHeight: 1.5 }}>
+            ⚠ Al usar un código de respaldo, tu 2FA se desactivará. En el siguiente login deberás configurarlo nuevamente.
+          </div>
+          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+          <button type="submit" disabled={loading || !backupCode || expired} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: loading || !backupCode || expired ? "#94a3b8" : "#dc2626", color: "#fff", fontSize: 14, fontWeight: 700, cursor: loading || !backupCode || expired ? "not-allowed" : "pointer", marginBottom: 10 }}>
+            {loading ? <span><span className="spin">⟳</span> Verificando...</span> : "Usar código de respaldo"}
+          </button>
+          <button type="button" onClick={() => { setUseBackup(false); setError(""); setBackupCode(""); }} disabled={loading} style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", color: "#475569", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            Volver al código normal
+          </button>
+        </form>
+      )}
+      {onCancel && (
+        <button onClick={onCancel} disabled={loading} style={{ width: "100%", padding: 10, borderRadius: 10, border: "none", background: "transparent", color: "#94a3b8", fontSize: 11, fontWeight: 600, cursor: "pointer", marginTop: 10 }}>
+          Cancelar login
+        </button>
+      )}
+    </AuthLayout>
+  );
+}
+// ═══════════════════════════════════════════════════════════════
+// ⭐ TWO-FACTOR SETTINGS MODAL (Fase 2) — gestión de 2FA desde dashboard
+// ═══════════════════════════════════════════════════════════════
+function TwoFactorSettingsModal({ session, authFetch, onClose, onLogoutAfterDisable }) {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("overview");
+  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const fetchStatus = async () => {
+    setLoading(true); setError("");
+    try {
+      const { data } = await authFetch(CONFIG.TWOFA_STATUS_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit }),
+      });
+      setStatus(data);
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") setError("No se pudo cargar estado: " + e.message);
+    } finally { setLoading(false); }
+  };
+  useEffect(() => { fetchStatus(); }, []);
+  const handleDisable = async (e) => {
+    e.preventDefault();
+    if (!password || !/^\d{6}$/.test(code)) { setError("Password y código de 6 dígitos requeridos"); return; }
+    setProcessing(true); setError("");
+    try {
+      const { data } = await authFetch(CONFIG.TWOFA_DISABLE_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, password, code }),
+      });
+      if (!data.success) { setError(data.error || "Error al desactivar 2FA"); setProcessing(false); return; }
+      alert("✓ 2FA desactivado. En el próximo login deberás configurarlo nuevamente (es obligatorio).");
+      onClose();
+      if (onLogoutAfterDisable) setTimeout(() => onLogoutAfterDisable(), 500);
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") setError(e.message);
+    } finally { setProcessing(false); }
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 520, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>AUTENTICACIÓN EN DOS PASOS</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>🛡 Configuración de 2FA</div>
+          </div>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
+        </div>
+        {loading && <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 13 }}><span className="spin">⟳</span> Cargando...</div>}
+        {!loading && status && view === "overview" && (
+          <div>
+            {status.enabled ? (
+              <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#166534", marginBottom: 4 }}>✓ 2FA está activo</div>
+                <div style={{ fontSize: 11, color: "#166534", lineHeight: 1.5 }}>
+                  {status.enrolled_at && <>Activado el {new Date(status.enrolled_at).toLocaleDateString("es-CO")}<br /></>}
+                  Códigos de respaldo disponibles: <strong>{status.backup_codes_remaining}/8</strong>
+                  {status.last_used_at && <><br />Último uso: {new Date(status.last_used_at).toLocaleString("es-CO")}</>}
+                </div>
+              </div>
+            ) : (
+              <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 10, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e" }}>⚠ 2FA no está activo</div>
+                <div style={{ fontSize: 11, color: "#92400e", marginTop: 4 }}>Cierra sesión y vuelve a iniciar para configurarlo (es obligatorio).</div>
+              </div>
+            )}
+            {status.enabled && status.backup_codes_remaining <= 2 && (
+              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: 14, marginBottom: 14, fontSize: 11, color: "#991b1b", lineHeight: 1.5 }}>
+                ⚠ Tienes pocos códigos de respaldo ({status.backup_codes_remaining}). Considera desactivar y reactivar 2FA para regenerar los 8.
+              </div>
+            )}
+            {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+            {status.enabled && (
+              <button onClick={() => { setView("disable"); setError(""); }} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #fecaca", background: "#fff", color: "#b91c1c", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                🔓 Desactivar 2FA
+              </button>
+            )}
+          </div>
+        )}
+        {!loading && view === "disable" && (
+          <form onSubmit={handleDisable}>
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: 14, marginBottom: 14, fontSize: 12, color: "#991b1b", lineHeight: 1.5 }}>
+              Para confirmar, ingresa tu contraseña actual y el código de 6 dígitos de tu app.<br />
+              <strong>Importante:</strong> Al desactivar, quedarás fuera hasta configurar 2FA de nuevo en el próximo login.
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6 }}>CONTRASEÑA ACTUAL</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={processing}
+                style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 14 }} />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6 }}>CÓDIGO ACTUAL (de tu app)</label>
+              <input type="text" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} disabled={processing}
+                placeholder="123456" inputMode="numeric"
+                style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 18, fontFamily: "monospace", textAlign: "center", letterSpacing: "0.3em" }} />
+            </div>
+            {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button type="button" onClick={() => { setView("overview"); setError(""); setPassword(""); setCode(""); }} disabled={processing}
+                style={{ flex: 1, padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", color: "#475569", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancelar</button>
+              <button type="submit" disabled={processing || !password || code.length !== 6}
+                style={{ flex: 1, padding: 12, borderRadius: 10, border: "none", background: processing || !password || code.length !== 6 ? "#94a3b8" : "#dc2626", color: "#fff", fontSize: 13, fontWeight: 700, cursor: processing || !password || code.length !== 6 ? "not-allowed" : "pointer" }}>
+                {processing ? "Desactivando..." : "Desactivar 2FA"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+// ═══════════════════════════════════════════════════════════════
+// ⭐ MODAL DE GESTIÓN DE SUB-USUARIOS (Fase 1 + botón Reset 2FA Fase 2)
 // ═══════════════════════════════════════════════════════════════
 function SubUsersModal({ session, onClose, authFetch }) {
   const [users, setUsers] = useState([]);
@@ -670,13 +1032,12 @@ function SubUsersModal({ session, onClose, authFetch }) {
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [deleting, setDeleting] = useState(null);
-
+  const [resetting2FA, setResetting2FA] = useState(null);
   const [newNombre, setNewNombre] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
-
   const fetchUsers = async () => {
     setLoading(true); setError("");
     try {
@@ -690,15 +1051,12 @@ function SubUsersModal({ session, onClose, authFetch }) {
     }
     finally { setLoading(false); }
   };
-
   useEffect(() => { fetchUsers(); }, []);
-
   const handleCreate = async (e) => {
     e.preventDefault();
     setCreateError("");
     if (!newNombre.trim() || !newEmail.trim() || !newPassword) { setCreateError("Todos los campos son requeridos"); return; }
     if (!newEmail.includes("@")) { setCreateError("Email inválido"); return; }
-    // ⭐ Validación de fortaleza alineada con el backend
     const strengthErr = checkPasswordStrength(newPassword, { nit: session.nit, email: newEmail });
     if (strengthErr) { setCreateError(strengthErr); return; }
     setCreating(true);
@@ -721,7 +1079,6 @@ function SubUsersModal({ session, onClose, authFetch }) {
     }
     finally { setCreating(false); }
   };
-
   const handleDelete = async (user) => {
     if (!confirm(`¿Eliminar al usuario ${user.nombre} (${user.email})? Esta acción no se puede deshacer.`)) return;
     setDeleting(user.user_id);
@@ -736,7 +1093,31 @@ function SubUsersModal({ session, onClose, authFetch }) {
     }
     finally { setDeleting(null); }
   };
-
+  // ⭐ Reset 2FA del sub-user (Fase 2) — requiere TOTP del master como confirmación
+  const handleReset2FA = async (user) => {
+    const masterCode = prompt(
+      `Para resetear el 2FA de ${user.nombre}, ingresa el código de 6 dígitos de TU app de autenticación.\n\n` +
+      `El usuario ${user.email} tendrá que configurar 2FA de nuevo en su próximo login.`
+    );
+    if (!masterCode) return;
+    if (!/^\d{6}$/.test(masterCode.trim())) { alert("Código inválido. Debe ser de 6 dígitos."); return; }
+    setResetting2FA(user.user_id);
+    try {
+      const { data } = await authFetch(CONFIG.TWOFA_RESET_SUBUSER_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          nit: session.nit,
+          target_user_id: user.user_id,
+          master_totp_code: masterCode.trim(),
+        }),
+      });
+      if (!data.success) { alert("Error al resetear 2FA: " + (data.error || "desconocido")); return; }
+      alert(`✓ 2FA de ${user.nombre} reseteado. En su próximo login configurará 2FA de nuevo.`);
+      await fetchUsers();
+    } catch (e) {
+      if (e.message !== 'SESSION_EXPIRED') alert("Error: " + e.message);
+    } finally { setResetting2FA(null); }
+  };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 640, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
@@ -748,13 +1129,11 @@ function SubUsersModal({ session, onClose, authFetch }) {
           </div>
           <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
         </div>
-
         {!showCreate && (
           <button onClick={() => setShowCreate(true)} style={{ width: "100%", padding: 12, borderRadius: 10, border: "2px dashed #cbd5e1", background: "#f8fafc", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569", marginBottom: 16 }}>
             + Agregar usuario
           </button>
         )}
-
         {showCreate && (
           <form onSubmit={handleCreate} style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 12, padding: 20, marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 12, letterSpacing: "0.1em" }}>NUEVO USUARIO</div>
@@ -784,9 +1163,7 @@ function SubUsersModal({ session, onClose, authFetch }) {
             </div>
           </form>
         )}
-
         {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
-
         {loading ? (
           <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 13 }}><span className="spin">⟳</span> Cargando usuarios...</div>
         ) : users.length === 0 ? (
@@ -810,19 +1187,30 @@ function SubUsersModal({ session, onClose, authFetch }) {
                     {u.status === "disabled" && (
                       <span style={{ fontSize: 9, background: "#fee2e2", color: "#991b1b", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>DESACTIVADO</span>
                     )}
+                    {u.twofa_enabled && (
+                      <span style={{ fontSize: 9, background: "#dcfce7", color: "#166534", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>🛡 2FA</span>
+                    )}
                     {u.last_login_at && (
                       <span style={{ fontSize: 9, color: "#94a3b8" }}>Último acceso: {dateStr(u.last_login_at)}</span>
                     )}
                   </div>
                 </div>
-                <button onClick={() => handleDelete(u)} disabled={deleting === u.user_id} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #fecaca", background: "#fff", fontSize: 11, fontWeight: 600, cursor: deleting === u.user_id ? "not-allowed" : "pointer", color: "#b91c1c" }}>
-                  {deleting === u.user_id ? "..." : "Eliminar"}
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {u.twofa_enabled && (
+                    <button onClick={() => handleReset2FA(u)} disabled={resetting2FA === u.user_id} title="Resetear 2FA del usuario"
+                      style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fffbeb", fontSize: 10, fontWeight: 600, cursor: resetting2FA === u.user_id ? "not-allowed" : "pointer", color: "#92400e" }}>
+                      {resetting2FA === u.user_id ? "..." : "🔄 Reset 2FA"}
+                    </button>
+                  )}
+                  <button onClick={() => handleDelete(u)} disabled={deleting === u.user_id}
+                    style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", fontSize: 10, fontWeight: 600, cursor: deleting === u.user_id ? "not-allowed" : "pointer", color: "#b91c1c" }}>
+                    {deleting === u.user_id ? "..." : "Eliminar"}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
-
         {users.length > 0 && users.some(u => u.has_pending_change) && (
           <div style={{ marginTop: 16, padding: "10px 14px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontSize: 11, color: "#92400e" }}>
             💡 Revisa tu correo para aprobar o rechazar los cambios de contraseña pendientes.
@@ -832,9 +1220,8 @@ function SubUsersModal({ session, onClose, authFetch }) {
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
-// MODAL DE CONFIGURACIÓN DE APIs (sin cambios en UI)
+// MODAL DE CONFIGURACIÓN DE APIs (sin cambios Fase 2)
 // ═══════════════════════════════════════════════════════════════
 function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [dianUrl, setDianUrl] = useState(credentials?.dianUrl || "");
@@ -843,13 +1230,11 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [erpUrl, setErpUrl] = useState(credentials?.erpUrl || SOFTWARE_API_URLS[session.software_contable] || "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
   const handleSave = async () => { setSaving(true); await onSave({ dianUrl, erpKey, erpUser, erpUrl }); setSaving(false); };
   const handleDelete = async () => {
     if (!confirm("¿Seguro que quieres olvidar las credenciales guardadas?")) return;
     setDeleting(true); await onDelete(); setDeleting(false);
   };
-
   const relativeTime = (iso) => {
     if (!iso) return null;
     const diff = Date.now() - new Date(iso).getTime();
@@ -865,7 +1250,6 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
     return `hace ${months} mes${months > 1 ? "es" : ""}`;
   };
   const lastUpdated = relativeTime(credentials?.updatedAt);
-
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 560, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
@@ -917,7 +1301,6 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
 // COMPONENTES COMPARTIDOS (sin cambios)
 // ═══════════════════════════════════════════════════════════════
@@ -930,12 +1313,10 @@ function Badge({ status }) {
   const s = S[status] || { bg: "#fef3c7", color: "#92400e", label: status };
   return <span style={{ background: s.bg, color: s.color, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{s.label}</span>;
 }
-
 function Risk({ level, score }) {
   const c = { bajo: "#16a34a", medio: "#f59e0b", alto: "#ef4444" }[level] || "#6b7280";
   return <span style={{ color: c, fontWeight: 600, fontSize: 12 }}>{score}/100 {(level || "").toUpperCase()}</span>;
 }
-
 function Field({ label, value, mono }) {
   return (
     <div style={{ marginBottom: 10 }}>
@@ -944,7 +1325,6 @@ function Field({ label, value, mono }) {
     </div>
   );
 }
-
 function SelectField({ label, value, opts, onChange, required, disabled, emptyMsg }) {
   return (
     <div>
@@ -956,7 +1336,6 @@ function SelectField({ label, value, opts, onChange, required, disabled, emptyMs
     </div>
   );
 }
-
 function TaxLine({ label, amount, percent, warn }) {
   if (!amount || amount <= 0) return null;
   return (
@@ -966,7 +1345,6 @@ function TaxLine({ label, amount, percent, warn }) {
     </div>
   );
 }
-
 function AiInsights({ inv }) {
   return (
     <div style={{ background: "linear-gradient(135deg, #f5f3ff, #eef2ff)", borderRadius: 10, padding: 14, border: "1px solid #ddd6fe", marginBottom: 16 }}>
@@ -981,8 +1359,6 @@ function AiInsights({ inv }) {
     </div>
   );
 }
-
-// ⭐ DianStatus ahora recibe authFetch y nit como props
 function DianStatus({ cufe, credentials, authFetch, nit }) {
   const [status, setStatus] = useState("idle");
   const [detail, setDetail] = useState("");
@@ -999,14 +1375,11 @@ function DianStatus({ cufe, credentials, authFetch, nit }) {
         if (e.message !== 'SESSION_EXPIRED') { setStatus("invalid"); setDetail("No se pudo validar"); }
       });
   }, [cufe, credentials?.dianUrl]);
-
   if (status === "no_creds") return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef3c7", border: "1px solid #fbbf24", fontSize: 12, color: "#92400e" }}>⚠ Conecta el API DIAN para validación automática</div>;
   if (status === "checking") return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#64748b" }}><span className="spin">⟳</span> Validando en DIAN...</div>;
   if (status === "valid") return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#dcfce7", border: "1px solid #86efac", fontSize: 12, color: "#166534", fontWeight: 600 }}>✓ Validada por DIAN {detail && `· ${detail}`}</div>;
   return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#991b1b" }}>✗ No validada {detail && `· ${detail}`}</div>;
 }
-
-// ⭐ InvoiceDetail ahora recibe authFetch y session
 function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading, authFetch, session }) {
   const [selected1, setSelected1] = useState("");
   const [selected2, setSelected2] = useState("");
@@ -1020,7 +1393,6 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading, auth
   const setters = [setSelected1, setSelected2, setSelected3];
   const requiredFields = erpFields.filter((f, i) => f.required).map((f, i) => values[i]);
   const canCausar = hasErp && requiredFields.every(v => v) && !saving;
-
   const handleCausar = async () => {
     setSaving(true);
     try {
@@ -1029,7 +1401,6 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading, auth
       await onCausar(inv, extras);
     } finally { setSaving(false); }
   };
-
   return (
     <div className="fade-in" style={{ background: "#fff", padding: 20, borderTop: "1px solid #e2e8f0" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
@@ -1088,7 +1459,6 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading, auth
     </div>
   );
 }
-
 function StatCard({ label, value, color, icon, subtitle }) {
   return (
     <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", border: "1px solid #e2e8f0", flex: 1, minWidth: 160 }}>
@@ -1101,7 +1471,6 @@ function StatCard({ label, value, color, icon, subtitle }) {
     </div>
   );
 }
-
 function EmptyState({ icon, title, message }) {
   return (
     <div style={{ textAlign: "center", padding: "80px 20px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
@@ -1111,19 +1480,16 @@ function EmptyState({ icon, title, message }) {
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
 // COMPUTE dashboardStats (sin cambios)
 // ═══════════════════════════════════════════════════════════════
 function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
   const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
   const isCausada = (f) => causadasIds.has(f.cufe) || f.estado === "CAUSADA";
-
   const count = facturas.length;
   const aprobadas = facturas.filter(isApproved);
   const causadas = facturas.filter(isCausada);
   const pendientes = aprobadas.filter(f => !isCausada(f));
-
   const totalFacturado = facturas.reduce((s, f) => s + (Number(f.total) || 0), 0);
   const totalNetoPagar = facturas.reduce((s, f) => s + (Number(f.total_a_pagar) || Number(f.total) || 0), 0);
   const totalIva = facturas.reduce((s, f) => s + (Number(f.iva) || 0), 0);
@@ -1131,7 +1497,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
   const totalReteiva = facturas.reduce((s, f) => s + (Number(f.reteiva) || 0), 0);
   const totalReteica = facturas.reduce((s, f) => s + (Number(f.reteica) || 0), 0);
   const totalRetenciones = totalRetefuente + totalReteiva + totalReteica;
-
   const bySupplier = {};
   facturas.forEach(f => {
     const key = f.emisor || "(sin emisor)";
@@ -1140,7 +1505,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     bySupplier[key].count += 1;
   });
   const topProveedores = Object.values(bySupplier).sort((a, b) => b.total - a.total).slice(0, 10);
-
   const byCategoria = {};
   facturas.forEach(f => {
     const key = f.categoria || "Sin categorizar";
@@ -1149,7 +1513,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     byCategoria[key].count += 1;
   });
   const categorias = Object.values(byCategoria).sort((a, b) => b.value - a.value);
-
   const byRisk = { bajo: 0, medio: 0, alto: 0, "sin clasificar": 0 };
   const byRiskAmount = { bajo: 0, medio: 0, alto: 0, "sin clasificar": 0 };
   facturas.forEach(f => {
@@ -1162,7 +1525,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     { name: "Medio", count: byRisk.medio, monto: byRiskAmount.medio, color: CHART_COLORS.risk_medio },
     { name: "Alto", count: byRisk.alto, monto: byRiskAmount.alto, color: CHART_COLORS.risk_alto },
   ].filter(r => r.count > 0);
-
   const byMonth = {};
   facturas.forEach(f => {
     const d = dateFromInv(f);
@@ -1174,7 +1536,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     byMonth[key].monto += Number(f.total) || 0;
   });
   const evolucionMensual = Object.values(byMonth).sort((a, b) => a.timestamp - b.timestamp);
-
   const retencionesPorMes = {};
   facturas.forEach(f => {
     const d = dateFromInv(f);
@@ -1186,9 +1547,7 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     retencionesPorMes[key].reteica += Number(f.reteica) || 0;
   });
   const retencionesData = Object.values(retencionesPorMes).filter(r => r.retefuente + r.reteiva + r.reteica > 0).sort((a, b) => a.timestamp - b.timestamp);
-
   const ticketPromedio = count > 0 ? totalFacturado / count : 0;
-
   return {
     count, count_aprobadas: aprobadas.length, count_pendientes: pendientes.length, count_causadas: causadas.length,
     totalFacturado, totalNetoPagar, totalIva, totalRetefuente, totalReteiva, totalReteica, totalRetenciones,
@@ -1196,7 +1555,6 @@ function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
     periodo: { desde: dateFrom || null, hasta: dateTo || null, filtro_activo: !!(dateFrom || dateTo) },
   };
 }
-
 // ═══════════════════════════════════════════════════════════════
 // DASHBOARD TAB (sin cambios)
 // ═══════════════════════════════════════════════════════════════
@@ -1211,15 +1569,12 @@ function ChartCard({ title, subtitle, children, height = 280 }) {
     </div>
   );
 }
-
 function DashboardView({ stats, loading }) {
   if (loading) return <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando datos...</div>;
   if (stats.count === 0) return <EmptyState icon="📊" title="Sin datos para mostrar" message="No hay facturas en el período seleccionado. Ajusta los filtros o espera que lleguen facturas procesadas." />;
-
   const periodoLabel = stats.periodo.filtro_activo
     ? `${stats.periodo.desde ? dateStr(stats.periodo.desde) : "inicio"} — ${stats.periodo.hasta ? dateStr(stats.periodo.hasta) : "hoy"}`
     : "Todas las facturas";
-
   return (
     <React.Fragment>
       <div style={{ background: "#0f172a", color: "#e2e8f0", padding: "10px 16px", borderRadius: 10, marginBottom: 14, fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
@@ -1320,9 +1675,8 @@ function DashboardView({ stats, loading }) {
     </React.Fragment>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
-// ASISTENTE
+// ASISTENTE (sin cambios)
 // ═══════════════════════════════════════════════════════════════
 function getQuickPrompts(ctx) {
   if (!ctx.session) return ["¿Qué es este sistema y cómo funciona?", "¿Cómo cambio mi contraseña?", "¿Qué documentos procesa el asistente?"];
@@ -1330,7 +1684,6 @@ function getQuickPrompts(ctx) {
   if (ctx.dashboardStats && ctx.dashboardStats.count > 0) return ["¿Cuál es mi proveedor más frecuente?", "Resúmeme el gasto del período", "¿Cuánto he retenido en total?"];
   return ["¿Qué significa la cuenta 5110?", "¿Cómo causo una factura de servicios?", "Diferencia entre gasto y costo", "¿Qué es el PUC?"];
 }
-
 function AssistantMessage({ role, content }) {
   const isUser = role === "user";
   return (
@@ -1341,14 +1694,11 @@ function AssistantMessage({ role, content }) {
     </div>
   );
 }
-
-// ⭐ AssistantChat ahora recibe authFetch
 function AssistantChat({ open, onClose, context, authFetch }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
-
   useEffect(() => {
     if (!open) return;
     if (messages.length === 0) {
@@ -1363,9 +1713,7 @@ function AssistantChat({ open, onClose, context, authFetch }) {
       setMessages([{ role: "assistant", content: greeting }]);
     }
   }, [open]);
-
   useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, sending]);
-
   const send = async (text) => {
     const userMsg = (text || input).trim();
     if (!userMsg || sending) return;
@@ -1374,8 +1722,6 @@ function AssistantChat({ open, onClose, context, authFetch }) {
     setInput("");
     setSending(true);
     try {
-      // ⭐ Si hay sesión activa, usar authFetch (endpoint protegido con JWT).
-      // Si no hay sesión (usuario no logueado), usar fetch normal (el asistente puede responder generalidades).
       let data;
       if (context.session && authFetch) {
         const result = await authFetch(CONFIG.ASSISTANT_URL, {
@@ -1420,10 +1766,8 @@ function AssistantChat({ open, onClose, context, authFetch }) {
       }
     } finally { setSending(false); }
   };
-
   if (!open) return null;
   const quickPrompts = getQuickPrompts(context);
-
   return (
     <div className="fade-in" style={{ position: "fixed", bottom: 90, right: 20, width: 380, maxWidth: "calc(100vw - 40px)", height: 560, maxHeight: "calc(100vh - 120px)", background: "#fff", borderRadius: 16, boxShadow: "0 25px 70px rgba(15, 23, 42, 0.35)", display: "flex", flexDirection: "column", zIndex: 99, border: "1px solid #e2e8f0", overflow: "hidden" }}>
       <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "14px 16px", color: "#fff" }}>
@@ -1455,8 +1799,6 @@ function AssistantChat({ open, onClose, context, authFetch }) {
     </div>
   );
 }
-
-// ⭐ AssistantFAB ahora recibe authFetch
 function AssistantFAB({ context, authFetch }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1469,9 +1811,8 @@ function AssistantFAB({ context, authFetch }) {
     </React.Fragment>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
-// ⭐ DASHBOARD — ahora recibe authFetch y lo propaga a sub-componentes
+// ⭐ DASHBOARD — con botón 🛡 2FA (Fase 2) en header
 // ═══════════════════════════════════════════════════════════════
 function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePassword }) {
   const [facturas, setFacturas] = useState([]);
@@ -1485,18 +1826,16 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
   const [dateTo, setDateTo] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showSubUsers, setShowSubUsers] = useState(false);
+  const [show2FASettings, setShow2FASettings] = useState(false); // ⭐ Fase 2
   const [credentials, setCredentials] = useState(session.credentials && session.credentials.erpKey ? session.credentials : null);
   const [erpParams, setErpParams] = useState(null);
   const [erpLoading, setErpLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("facturas");
-
   const isMaster = session.role === "master";
   const isSubUser = session.role === "sub_user";
-
   const fetchFacturas = async () => {
     setLoading(true); setError("");
     try {
-      // ⭐ Cambio GET → POST con body JSON (para que Verificar JWT pueda cross-check el nit)
       const { data } = await authFetch(CONFIG.FACTURAS_URL, {
         method: "POST",
         body: JSON.stringify({ nit: session.nit }),
@@ -1508,7 +1847,6 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
     }
     finally { setLoading(false); }
   };
-
   const fetchErpParams = async (creds) => {
     if (!creds?.erpKey || !creds?.erpUrl) { setErpParams(null); return; }
     setErpLoading(true);
@@ -1523,7 +1861,6 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
     }
     finally { setErpLoading(false); }
   };
-
   useEffect(() => { fetchFacturas(); }, []);
   useEffect(() => { if (credentials) fetchErpParams(credentials); }, [credentials]);
   useEffect(() => { if (onContextChange) onContextChange({ erpParams }); }, [erpParams]);
@@ -1533,7 +1870,6 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
     onContextChange({ currentInvoice: current });
   }, [expanded, facturas]);
   useEffect(() => { if (onContextChange) onContextChange({ currentTab: activeTab }); }, [activeTab]);
-
   const handleCausar = async (inv, extras) => {
     try {
       const payload = { ...inv, ...extras, usuario: session.correo || session.email || session.nit, empresa_nit: session.nit, software_contable: session.software_contable, credentials, causado_at: new Date().toISOString() };
@@ -1549,9 +1885,7 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
       if (e.message !== 'SESSION_EXPIRED') alert("Error al causar: " + e.message);
     }
   };
-
   const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
-
   const dateFiltered = useMemo(() => {
     return facturas.filter((f) => {
       const fechaInv = dateFromInv(f);
@@ -1568,7 +1902,6 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
       return true;
     });
   }, [facturas, dateFrom, dateTo, search]);
-
   const filtered = useMemo(() => {
     return dateFiltered.filter((f) => {
       const causada = causadas.has(f.cufe) || f.estado === "CAUSADA";
@@ -1577,7 +1910,6 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
       return true;
     });
   }, [dateFiltered, filter, causadas]);
-
   const stats = useMemo(() => {
     const aprobadas = facturas.filter(isApproved);
     const pendientes = aprobadas.filter((f) => !causadas.has(f.cufe) && f.estado !== "CAUSADA");
@@ -1585,11 +1917,8 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
     const totalMonto = filtered.reduce((acc, f) => acc + (Number(f.total) || 0), 0);
     return { pendientes: pendientes.length, causadas: causadasArr.length, total: aprobadas.length, totalMonto };
   }, [facturas, filtered, causadas]);
-
   const dashboardStats = useMemo(() => computeDashboardStats(dateFiltered, causadas, dateFrom, dateTo), [dateFiltered, causadas, dateFrom, dateTo]);
-
   useEffect(() => { if (onContextChange) onContextChange({ dashboardStats }); }, [dashboardStats]);
-
   const quickDate = (dias) => {
     const hasta = new Date();
     const desde = new Date();
@@ -1597,14 +1926,10 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
     setDateFrom(desde.toISOString().slice(0, 10));
     setDateTo(hasta.toISOString().slice(0, 10));
   };
-
   const noFacturasForEmpresa = !loading && !error && facturas.length === 0;
-
-  // Etiqueta que muestra quién está logueado
   const userBadge = isSubUser
     ? `👤 ${session.nombre || session.email} · Usuario`
     : `🏢 Admin · ${session.correo}`;
-
   return (
     <div style={{ minHeight: "100vh" }}>
       <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "18px 24px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
@@ -1618,7 +1943,6 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
             <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>NIT {session.nit} · {session.software_contable} · {userBadge}</div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            {/* ⭐ Solo master puede conectar APIs y gestionar usuarios */}
             {isMaster && (
               <button onClick={() => setShowSettings(true)} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: credentials ? "#10b981" : "transparent", color: credentials ? "#fff" : "#94a3b8", border: `1px solid ${credentials ? "#10b981" : "#334155"}` }}>
                 {credentials ? "✓ APIs conectadas" : "⚙ Conectar APIs"}
@@ -1629,6 +1953,10 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
                 👥 Usuarios
               </button>
             )}
+            {/* ⭐ Fase 2: botón 2FA visible para master y sub-user */}
+            <button onClick={() => setShow2FASettings(true)} title="Configuración 2FA" style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
+              🛡 2FA
+            </button>
             <button onClick={onChangePassword} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
               🔒 Cambiar contraseña
             </button>
@@ -1638,7 +1966,6 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
           </div>
         </div>
       </div>
-
       <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 24px" }}>
         {noFacturasForEmpresa ? (
           <div style={{ marginTop: 40 }}>
@@ -1660,9 +1987,7 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
                 }}>{t.label}</button>
               ))}
             </div>
-
             {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#991b1b" }}>{error}</div>}
-
             <div style={{ background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e2e8f0", marginBottom: 12 }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {activeTab === "facturas" && [
@@ -1707,7 +2032,6 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
                 ))}
               </div>
             </div>
-
             {activeTab === "facturas" && (
               <React.Fragment>
                 <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
@@ -1754,12 +2078,10 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
                 )}
               </React.Fragment>
             )}
-
             {activeTab === "dashboard" && <DashboardView stats={dashboardStats} loading={loading} />}
           </React.Fragment>
         )}
       </div>
-
       {showSettings && isMaster && (
         <ApiSettingsModal session={session} credentials={credentials} onClose={() => setShowSettings(false)}
           onSave={async (creds) => {
@@ -1793,41 +2115,46 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
           }}
         />
       )}
-
       {showSubUsers && isMaster && (
         <SubUsersModal session={session} onClose={() => setShowSubUsers(false)} authFetch={authFetch} />
+      )}
+      {/* ⭐ Fase 2: modal de configuración 2FA (visible para master y sub-user) */}
+      {show2FASettings && (
+        <TwoFactorSettingsModal
+          session={session}
+          authFetch={authFetch}
+          onClose={() => setShow2FASettings(false)}
+          onLogoutAfterDisable={onLogout}
+        />
       )}
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
-// APP (router)
+// APP (router) — con estados 2FA (Fase 2)
 // ═══════════════════════════════════════════════════════════════
 function getInitialView() {
   const params = new URLSearchParams(window.location.search);
   if (params.get("reset_token")) return "reset";
   return "login";
 }
-
 function App() {
   const [view, setView] = useState(getInitialView);
   const [session, setSession] = useState(null);
   const [forcedChangeCtx, setForcedChangeCtx] = useState(null);
+  const [twoFactorCtx, setTwoFactorCtx] = useState(null); // ⭐ Fase 2: contexto para TwoFactorScreen
+  const [enrollmentCtx, setEnrollmentCtx] = useState(null); // ⭐ Fase 2: contexto para EnrollmentScreen
   const [resetToken, setResetToken] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get("reset_token") || null;
   });
   const [assistantContext, setAssistantContext] = useState({ session: null, erpParams: null, currentInvoice: null, currentTab: null, dashboardStats: null });
-
   useEffect(() => { setAssistantContext((c) => ({ ...c, session })); }, [session]);
-
   const clearResetTokenFromUrl = () => {
     const url = new URL(window.location.href);
     url.searchParams.delete("reset_token");
     window.history.replaceState({}, "", url.toString());
   };
-
   // ⭐ Helper authFetch global — añade Bearer token, maneja 401 y body vacío
   const authFetch = async (url, options = {}) => {
     const token = session?.access_token;
@@ -1838,7 +2165,6 @@ function App() {
     };
     const r = await fetch(url, { ...options, headers });
     const text = await r.text();
-
     // Body vacío (bloqueado por JWT/rate-limit) o 401 → logout automático
     if (!text || r.status === 401) {
       console.warn('authFetch: token inválido/expirado → logout automático');
@@ -1846,14 +2172,11 @@ function App() {
       setView("login");
       throw new Error('SESSION_EXPIRED');
     }
-
     let data;
     try { data = JSON.parse(text); }
     catch (e) { throw new Error('RESPONSE_NOT_JSON'); }
-
     return { ok: r.ok, status: r.status, data };
   };
-
   let screen;
   if (view === "reset" && resetToken) {
     screen = <ResetPasswordScreen token={resetToken} onSuccess={() => { clearResetTokenFromUrl(); setResetToken(null); setView("login"); }} />;
@@ -1864,17 +2187,55 @@ function App() {
       onSuccess={() => { setForcedChangeCtx(null); setView("login"); alert("✓ Contraseña actualizada. Inicia sesión con tu nueva contraseña."); }}
       onCancel={() => {}} />;
   } else if (view === "change_voluntary" && session) {
-    // ⭐ Si es sub-usuario, el modo es "sub_user" (requiere aprobación del master)
     const mode = session.role === "sub_user" ? "sub_user" : "voluntary";
     screen = <ChangePasswordScreen mode={mode} session={session} nit={session.nit}
       onSuccess={() => { setView("dashboard"); alert("✓ Contraseña actualizada correctamente."); }}
       onCancel={() => setView("dashboard")} />;
+  } else if (view === "verify_2fa" && twoFactorCtx) {
+    // ⭐ Fase 2: pantalla de verificación TOTP tras login con 2FA activo
+    screen = <TwoFactorScreen
+      ctx={twoFactorCtx}
+      onSuccess={(data) => {
+        // data contiene access_token y toda la info de sesión
+        setSession({
+          ...data,
+          nit: twoFactorCtx.nit,
+          role: twoFactorCtx.loginType === "master" ? "master" : "sub_user",
+        });
+        setTwoFactorCtx(null);
+        setView("dashboard");
+      }}
+      onCancel={() => { setTwoFactorCtx(null); setView("login"); }}
+    />;
+  } else if (view === "enroll_2fa" && enrollmentCtx) {
+    // ⭐ Fase 2: pantalla de configuración 2FA obligatoria tras login sin 2FA
+    screen = <EnrollmentScreen
+      ctx={enrollmentCtx}
+      onSuccess={() => {
+        // Tras guardar backup codes, volver al login para que entre con 2FA activo
+        setEnrollmentCtx(null);
+        setView("login");
+        alert("✓ 2FA configurado correctamente. Inicia sesión de nuevo e ingresa el código de 6 dígitos.");
+      }}
+      onCancel={() => { setEnrollmentCtx(null); setView("login"); }}
+    />;
   } else if (view === "dashboard" && session) {
-    screen = <Dashboard session={session} authFetch={authFetch} onLogout={() => { setSession(null); setView("login"); }} onChangePassword={() => setView("change_voluntary")} onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))} />;
+    screen = <Dashboard
+      session={session}
+      authFetch={authFetch}
+      onLogout={() => { setSession(null); setView("login"); }}
+      onChangePassword={() => setView("change_voluntary")}
+      onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))}
+    />;
   } else {
-    screen = <LoginScreen onLogin={(data) => { setSession(data); setView("dashboard"); }} onForgotPassword={() => setView("forgot")} onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }} />;
+    screen = <LoginScreen
+      onLogin={(data) => { setSession(data); setView("dashboard"); }}
+      onForgotPassword={() => setView("forgot")}
+      onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }}
+      onRequire2FA={(ctx) => { setTwoFactorCtx(ctx); setView("verify_2fa"); }}
+      onRequire2FAEnrollment={(ctx) => { setEnrollmentCtx(ctx); setView("enroll_2fa"); }}
+    />;
   }
-
   return (
     <React.Fragment>
       {screen}
@@ -1882,7 +2243,6 @@ function App() {
     </React.Fragment>
   );
 }
-
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
