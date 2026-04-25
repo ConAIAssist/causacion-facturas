@@ -1262,7 +1262,7 @@ function SubUsersModal({ session, onClose, authFetch }) {
 // ═══════════════════════════════════════════════════════════════
 function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [dianUrl, setDianUrl] = useState(credentials?.dianUrl || "");
-  const [erpKey, setErpKey] = useState(credentials?.erpKey || "");
+  const [erpKey, setErpKey] = useState(""); // Server-side encryption: nunca precarga la key del backend
   const [erpUser, setErpUser] = useState(credentials?.erpUser || "");
   const [erpUrl, setErpUrl] = useState(credentials?.erpUrl || SOFTWARE_API_URLS[session.software_contable] || "");
   const [saving, setSaving] = useState(false);
@@ -1314,7 +1314,12 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
           </div>
           <div>
             <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>API KEY / TOKEN</label>
-            <input type="password" value={erpKey} onChange={(e) => setErpKey(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
+            {credentials?.has_erp_key && credentials?.erp_key_preview && (
+              <div style={{ fontSize: 11, color: "#0369a1", marginBottom: 6, padding: "6px 10px", background: "#f0f9ff", borderRadius: 6, border: "1px solid #bae6fd" }}>
+                ✓ Clave guardada: <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{credentials.erp_key_preview}</span> · Escribe una nueva para reemplazarla
+              </div>
+            )}
+            <input type="password" value={erpKey} onChange={(e) => setErpKey(e.target.value)} placeholder={credentials?.has_erp_key ? "Dejar vacío para mantener la actual" : "Ingresa tu API Key"} style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
           </div>
         </div>
         <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 11, color: "#92400e" }}>
@@ -1322,7 +1327,7 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
         </div>
         {lastUpdated && <div style={{ fontSize: 11, color: "#64748b", marginBottom: 16, textAlign: "right", fontStyle: "italic" }}>Última actualización: {lastUpdated}</div>}
         <div style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
-          {credentials?.erpKey ? (
+          {credentials?.has_erp_key ? (
             <button onClick={handleDelete} disabled={deleting || saving} style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #fecaca", background: "#fff", fontSize: 12, fontWeight: 600, cursor: deleting ? "not-allowed" : "pointer", color: "#b91c1c" }}>
               {deleting ? "Olvidando..." : "Olvidar credenciales"}
             </button>
@@ -1424,7 +1429,7 @@ function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading, auth
   const [notas, setNotas] = useState("");
   const [saving, setSaving] = useState(false);
   const retenciones = inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0;
-  const hasErp = credentials?.erpKey && erpParams;
+  const hasErp = credentials?.has_erp_key && erpParams;
   const erpFields = erpParams?.fields || [];
   const values = [selected1, selected2, selected3];
   const setters = [setSelected1, setSelected2, setSelected3];
@@ -1864,7 +1869,7 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
   const [showSettings, setShowSettings] = useState(false);
   const [showSubUsers, setShowSubUsers] = useState(false);
   const [show2FASettings, setShow2FASettings] = useState(false); // ⭐ Fase 2
-  const [credentials, setCredentials] = useState(session.credentials && session.credentials.erpKey ? session.credentials : null);
+  const [credentials, setCredentials] = useState(session.credentials && session.credentials.has_erp_key ? session.credentials : null);
   const [erpParams, setErpParams] = useState(null);
   const [erpLoading, setErpLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("facturas");
@@ -1885,12 +1890,12 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
     finally { setLoading(false); }
   };
   const fetchErpParams = async (creds) => {
-    if (!creds?.erpKey || !creds?.erpUrl) { setErpParams(null); return; }
+    if (!creds?.has_erp_key || !creds?.erpUrl) { setErpParams(null); return; }
     setErpLoading(true);
     try {
       const { data } = await authFetch(CONFIG.ERP_PARAMS_URL, {
         method: "POST",
-        body: JSON.stringify({ nit: session.nit, software: session.software_contable, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey, empresa_nit: session.nit }),
+        body: JSON.stringify({ nit: session.nit, software: session.software_contable, empresa_nit: session.nit }),
       });
       setErpParams(data);
     } catch (e) {
@@ -1909,7 +1914,7 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
   useEffect(() => { if (onContextChange) onContextChange({ currentTab: activeTab }); }, [activeTab]);
   const handleCausar = async (inv, extras) => {
     try {
-      const payload = { ...inv, ...extras, usuario: session.correo || session.email || session.nit, empresa_nit: session.nit, software_contable: session.software_contable, credentials, causado_at: new Date().toISOString() };
+      const payload = { ...inv, ...extras, usuario: session.correo || session.email || session.nit, empresa_nit: session.nit, software_contable: session.software_contable, causado_at: new Date().toISOString() };
       const { data } = await authFetch(CONFIG.CAUSAR_URL, {
         method: "POST",
         body: JSON.stringify({ nit: session.nit, ...payload })
@@ -2128,7 +2133,17 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
                 body: JSON.stringify({ nit: session.nit, dianUrl: creds.dianUrl, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey })
               });
               if (!data.success) throw new Error(data.error || "Error al guardar");
-              setCredentials({ ...creds, updatedAt: data.updated_at || new Date().toISOString() });
+              // Después de guardar: actualizar el state SIN erpKey (server-side pattern).
+              // Marcamos has_erp_key=true porque acabamos de enviar una key válida.
+              const keyPreview = creds.erpKey ? '••••' + creds.erpKey.slice(-4) : (credentials?.erp_key_preview || '');
+              setCredentials({
+                dianUrl: creds.dianUrl,
+                erpUrl: creds.erpUrl,
+                erpUser: creds.erpUser,
+                has_erp_key: !!creds.erpKey || !!credentials?.has_erp_key,
+                erp_key_preview: keyPreview,
+                updatedAt: data.updated_at || new Date().toISOString()
+              });
               setShowSettings(false);
               alert("✓ Credenciales guardadas. Cargando parámetros del ERP...");
             } catch (e) {
