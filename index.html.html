@@ -135,6 +135,27 @@ function dateFromInv(inv) {
   const d = inv.fecha_aprobacion || inv.processed_at || inv.causado_at;
   return d ? new Date(d) : null;
 }
+// ═══════════════════════════════════════════════════════════════
+// ⭐ Normaliza factura desde el sheet `registro_contable` al
+// schema que esperan los componentes (nombres alineados al UI).
+// Tolerante: si el campo ya viene con el nombre del frontend, lo
+// usa directo; si no, hace fallback al nombre del sheet.
+// ═══════════════════════════════════════════════════════════════
+function normalizeFactura(f) {
+  if (!f || typeof f !== "object") return f;
+  return {
+    ...f,
+    nit_emisor:          f.nit_emisor          || f.emisor_nit,
+    motivo_rechazo:      f.motivo_rechazo      || f.rechazo_motivo_codigo,
+    descripcion_rechazo: f.descripcion_rechazo || f.rechazo_descripcion,
+    fecha_rechazo:       f.fecha_rechazo       || f.rechazo_confirmed_at,
+    rechazo_decided_by:  f.rechazo_decided_by  || f.rechazo_confirmed_by,
+    // El sheet no tiene fecha_emision; usa los timestamps disponibles como fallback
+    fecha_emision:       f.fecha_emision       || f.fecha_aprobacion || f.processed_at || f.created_at,
+    // Receptor: el sheet a veces lo guarda como receptor_nombre o razon_social_receptor
+    receptor:            f.receptor            || f.receptor_nombre  || f.razon_social_receptor,
+  };
+}
 function dateStr(d) {
   if (!d) return "—";
   const dt = new Date(d);
@@ -2655,7 +2676,8 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
         body: JSON.stringify({ nit: session.nit }),
       });
       const list = Array.isArray(data) ? data : (data.facturas || []);
-      setFacturas(list);
+      const normalized = list.map(normalizeFactura);
+      setFacturas(normalized);
       // credentials may come piggy-backed
       if (data.credentials) setCredentials(data.credentials);
     } catch (e) {
