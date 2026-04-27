@@ -2616,14 +2616,24 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   const [search, setSearch] = useState("");
   const [filterEstado, setFilterEstado] = useState("ALL");
 
-  // ⭐ authFetch helper con manejo SESSION_EXPIRED
+  // ⭐ authFetch helper — manda el token en el body (n8n Cloud redacta Authorization header)
   const authFetch = async (url, options = {}) => {
     const headers = {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.token}`,
       ...(options.headers || {}),
     };
-    const res = await fetch(url, { ...options, headers });
+    // Inyectar el token en el body en lugar del header Authorization
+    let body = options.body;
+    if (body && typeof body === 'string') {
+      try {
+        const parsed = JSON.parse(body);
+        parsed.__auth_token = session.token;
+        body = JSON.stringify(parsed);
+      } catch (e) { /* body no es JSON válido, dejarlo como está */ }
+    } else if (!body) {
+      body = JSON.stringify({ __auth_token: session.token });
+    }
+    const res = await fetch(url, { ...options, headers, body });
     let data;
     try { data = await res.json(); } catch (e) { data = {}; }
     if (res.status === 401 || data?.error === "SESSION_EXPIRED" || data?.code === "SESSION_EXPIRED") {
@@ -2933,15 +2943,24 @@ function App() {
     setView("login");
   }
 
-  // authFetch para usar en TwoFactorSettingsModal
+  // authFetch para usar en TwoFactorSettingsModal — manda token en body
   const authFetch = async (url, options = {}) => {
     if (!session) throw new Error("No session");
     const headers = {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${session.token}`,
       ...(options.headers || {}),
     };
-    const res = await fetch(url, { ...options, headers });
+    let body = options.body;
+    if (body && typeof body === 'string') {
+      try {
+        const parsed = JSON.parse(body);
+        parsed.__auth_token = session.token;
+        body = JSON.stringify(parsed);
+      } catch (e) { /* body no es JSON válido, dejarlo como está */ }
+    } else if (!body) {
+      body = JSON.stringify({ __auth_token: session.token });
+    }
+    const res = await fetch(url, { ...options, headers, body });
     let data;
     try { data = await res.json(); } catch (e) { data = {}; }
     if (res.status === 401 || data?.error === "SESSION_EXPIRED" || data?.code === "SESSION_EXPIRED") {
