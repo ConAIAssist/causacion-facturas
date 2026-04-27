@@ -156,6 +156,29 @@ function normalizeFactura(f) {
     receptor:            f.receptor            || f.receptor_nombre  || f.razon_social_receptor,
   };
 }
+// ═══════════════════════════════════════════════════════════════
+// ⭐ Decide si un rechazo va por RADIAN 031 (a DIAN) o Interno.
+// Debe coincidir EXACTAMENTE con la lógica del backend
+// (nodo "Decidir RADIAN/Interno"). Si la IA ya decidió, respetarlo.
+//
+// Reglas:
+//  - "Contado"/"cash" → INTERNO (siempre)
+//  - "Crédito" explícito O fecha_vencimiento ≠ fecha_aprobacion → RADIAN
+//  - Cualquier otro caso (Consignación, Transferencia, etc. sin
+//    fecha_vencimiento) → INTERNO por seguridad
+// ═══════════════════════════════════════════════════════════════
+function decidirTipoRechazo(factura, aiData) {
+  if (aiData && aiData.tipo_rechazo) return aiData.tipo_rechazo;
+  const medioPago = String(factura?.medio_pago || "").toLowerCase();
+  const esContado = medioPago.includes("contado") || medioPago === "cash";
+  const esCreditoExplicito = /credit|cr[eé]dit/i.test(medioPago);
+  const tieneFechaVencimiento =
+    factura?.fecha_vencimiento &&
+    factura.fecha_vencimiento !== factura.fecha_aprobacion &&
+    factura.fecha_vencimiento !== "";
+  const aplicaRadian = !esContado && (esCreditoExplicito || tieneFechaVencimiento);
+  return aplicaRadian ? "RADIAN" : "INTERNO";
+}
 function dateStr(d) {
   if (!d) return "—";
   const dt = new Date(d);
@@ -1632,7 +1655,7 @@ function RechazoTarjeta({ factura, aiData, aiLoading, selected, onToggleSelect, 
   const confPct = aiData?.confianza ? Math.round(aiData.confianza * 100) : null;
 
   // Determinar si es RADIAN (a DIAN) o interno (contado/ya pagado)
-  const tipoRechazo = aiData?.tipo_rechazo || (factura.medio_pago === "Contado" ? "INTERNO" : "RADIAN");
+  const tipoRechazo = decidirTipoRechazo(factura, aiData);
   const esRadian = tipoRechazo === "RADIAN";
 
   return (
@@ -1782,7 +1805,7 @@ function RechazoConfirmModal({ items, onConfirm, onClose, processing }) {
   const [confirmText, setConfirmText] = useState("");
   const isReady = confirmText === "ENVIAR";
   const totalAmount = items.reduce((s, x) => s + (Number(x.factura.total) || 0), 0);
-  const radianCount = items.filter(x => (x.aiData?.tipo_rechazo || (x.factura.medio_pago === "Contado" ? "INTERNO" : "RADIAN")) === "RADIAN").length;
+  const radianCount = items.filter(x => decidirTipoRechazo(x.factura, x.aiData) === "RADIAN").length;
   const internoCount = items.length - radianCount;
 
   return (
