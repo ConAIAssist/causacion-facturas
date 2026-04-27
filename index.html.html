@@ -2919,7 +2919,7 @@ function App() {
 
   function buildSession(data) {
     return {
-      token: data.token || data.session_token || data.jwt,
+      token: data.access_token || data.token || data.session_token || data.jwt,
       nit: data.nit,
       empresa: data.empresa || null,
       nombre: data.nombre || null,
