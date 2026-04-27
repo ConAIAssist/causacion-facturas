@@ -2684,13 +2684,16 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
     const res = await fetch(url, { ...options, headers, body });
     let data;
     try { data = await res.json(); } catch (e) { data = {}; }
+    // Sesión expirada → forzar logout
     if (res.status === 401 || data?.error === "SESSION_EXPIRED" || data?.code === "SESSION_EXPIRED") {
       alert("Tu sesión expiró. Por favor inicia sesión nuevamente.");
       onLogout();
       throw new Error("SESSION_EXPIRED");
     }
-    if (!res.ok && !data?.success && !Array.isArray(data) && !data?.facturas && !data?.users) {
-      throw new Error(data?.error || data?.message || `Error ${res.status}`);
+    // Error HTTP → throw para que el caller lo maneje en catch
+    // Excepciones: respuestas que son arrays directos (legacy) o tienen facturas/users embebidos
+    if (!res.ok && !Array.isArray(data) && !data?.facturas && !data?.users) {
+      throw new Error(data?.error || data?.message || data?.mensaje || `Error ${res.status}`);
     }
     return { res, data };
   };
@@ -3012,10 +3015,15 @@ function App() {
     const res = await fetch(url, { ...options, headers, body });
     let data;
     try { data = await res.json(); } catch (e) { data = {}; }
+    // Sesión expirada → forzar logout
     if (res.status === 401 || data?.error === "SESSION_EXPIRED" || data?.code === "SESSION_EXPIRED") {
       alert("Tu sesión expiró. Por favor inicia sesión nuevamente.");
       handleLogout();
       throw new Error("SESSION_EXPIRED");
+    }
+    // Error HTTP → throw para que el caller lo maneje en catch
+    if (!res.ok && !Array.isArray(data) && !data?.facturas && !data?.users) {
+      throw new Error(data?.error || data?.message || data?.mensaje || `Error ${res.status}`);
     }
     return { res, data };
   };
