@@ -29,6 +29,7 @@ const {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, AreaChart, Area,
 } = window.Recharts;
+
 const CONFIG = {
   LOGIN_URL:    "https://conaiassist.app.n8n.cloud/webhook/api/login",
   FACTURAS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/facturas",
@@ -41,13 +42,13 @@ const CONFIG = {
   CHANGE_PASSWORD_URL: "https://conaiassist.app.n8n.cloud/webhook/api/change-password",
   REQUEST_RESET_URL: "https://conaiassist.app.n8n.cloud/webhook/api/request-password-reset",
   RESET_PASSWORD_URL: "https://conaiassist.app.n8n.cloud/webhook/api/reset-password",
-  // ⭐ Endpoints para sub-usuarios (Fase 1)
+  // Sub-usuarios (Fase 1)
   SUB_USER_LOGIN_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-user-login",
   SUB_USERS_LIST_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/list",
   SUB_USERS_CREATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/create",
   SUB_USERS_DELETE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/delete",
   SUB_USER_REQUEST_PW_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/request-password-change",
-  // ⭐ NUEVOS endpoints 2FA (Fase 2)
+  // 2FA (Fase 2)
   TWOFA_ENROLL_START_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/enroll/start",
   TWOFA_ENROLL_CONFIRM_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/enroll/confirm",
   TWOFA_VERIFY_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/verify",
@@ -55,7 +56,11 @@ const CONFIG = {
   TWOFA_RECOVERY_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/recovery",
   TWOFA_STATUS_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/status",
   TWOFA_RESET_SUBUSER_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/reset-subuser",
+  // ⭐ Rechazos (Fase 3)
+  RECHAZO_RECOMENDAR_URL: "https://conaiassist.app.n8n.cloud/webhook/api/rechazo-recomendar",
+  CAUSAR_RECHAZO_LOTE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/causar-rechazo-lote",
 };
+
 const SOFTWARE_API_URLS = {
   Siigo: "https://api.siigo.com",
   Alegra: "https://api.alegra.com",
@@ -65,6 +70,7 @@ const SOFTWARE_API_URLS = {
   "World Office": "https://api.worldoffice.cloud",
   Odoo: "https://tuinstancia.odoo.com",
 };
+
 const CHART_COLORS = {
   primary: "#0f172a",
   pendiente: "#f59e0b",
@@ -78,6 +84,42 @@ const CHART_COLORS = {
   reteica: "#f97316",
   palette: ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#ef4444", "#6366f1"],
 };
+
+// ⭐ FASE 3 — Motivos de rechazo (alineados con DIAN RADIAN)
+const MOTIVOS_RECHAZO = [
+  { key: "RECLAMO_VALORES",     label: "Reclamo por valores incorrectos",        descripcion: "Diferencias en subtotal, IVA, retenciones o total" },
+  { key: "RECLAMO_NO_RECIBIDO", label: "Mercancía/servicio no recibido",         descripcion: "No se recibió lo facturado" },
+  { key: "RECLAMO_DIFERENTE",   label: "Mercancía/servicio diferente al pedido", descripcion: "Lo recibido no corresponde a lo solicitado" },
+  { key: "RECLAMO_DATOS_ADQ",   label: "Datos del adquirente incorrectos",       descripcion: "NIT, razón social o dirección del receptor mal" },
+  { key: "RECLAMO_DATOS_EMI",   label: "Datos del emisor incorrectos",           descripcion: "Información del proveedor con errores" },
+  { key: "RECLAMO_DUPLICADA",   label: "Factura duplicada",                      descripcion: "Ya existe otra factura con el mismo concepto" },
+  { key: "RECLAMO_SIN_OC",      label: "Sin orden de compra autorizada",         descripcion: "No hay OC que respalde la facturación" },
+  { key: "RECLAMO_TRIBUTARIO",  label: "Errores tributarios",                    descripcion: "Cálculo erróneo de IVA, ICA, retenciones, etc." },
+  { key: "RECLAMO_OTRO",        label: "Otro motivo",                            descripcion: "Especificar en la descripción" },
+];
+
+// ⭐ FASE 3 — Umbrales de confianza para auto-selección de la IA
+const CONFIDENCE_AUTO_SELECT = 0.85;  // ≥85% → auto-selecciona la factura
+const CONFIDENCE_BLOCKED     = 0.60;  // <60% → no se puede causar sin edición manual
+
+const CONF_COLORS = {
+  high:   { bg: "#dcfce7", border: "#86efac", text: "#166534", label: "Alta confianza" },
+  medium: { bg: "#fef3c7", border: "#fbbf24", text: "#92400e", label: "Confianza media" },
+  low:    { bg: "#fef2f2", border: "#fecaca", text: "#991b1b", label: "Confianza baja" },
+};
+
+function getConfLevel(confianza) {
+  if (typeof confianza !== "number") return "low";
+  if (confianza >= CONFIDENCE_AUTO_SELECT) return "high";
+  if (confianza >= CONFIDENCE_BLOCKED) return "medium";
+  return "low";
+}
+
+function motivoLabelByKey(key) {
+  const m = MOTIVOS_RECHAZO.find(x => x.key === key);
+  return m ? m.label : (key || "—");
+}
+
 // ═══════════════════════════════════════════════════════════════
 // UTILIDADES
 // ═══════════════════════════════════════════════════════════════
@@ -109,8 +151,9 @@ function weekStart(d) {
   const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
   return new Date(dt.setDate(diff));
 }
+
 // ═══════════════════════════════════════════════════════════════
-// ⭐ PASSWORD STRENGTH — validación compartida (debe coincidir con backend)
+// PASSWORD STRENGTH (debe coincidir con backend)
 // ═══════════════════════════════════════════════════════════════
 const PASSWORD_SPECIAL_REGEX = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/;
 function checkPasswordRules(password, opts) {
@@ -210,6 +253,7 @@ function PasswordStrengthHint({ password, opts }) {
     </div>
   );
 }
+
 // ═══════════════════════════════════════════════════════════════
 // AUTH LAYOUT
 // ═══════════════════════════════════════════════════════════════
@@ -227,7 +271,8 @@ function AuthLayout({ title, subtitle, children }) {
     </div>
   );
 }
-// ⭐ LoginScreen con toggle master/sub-user + soporte 2FA (Fase 2)
+
+// LoginScreen con toggle master/sub-user + soporte 2FA (Fase 2)
 function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onRequire2FA, onRequire2FAEnrollment }) {
   const [loginType, setLoginType] = useState("master");
   const [nit, setNit] = useState("");
@@ -267,13 +312,11 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
         setLoading(false);
         return;
       }
-      // ⭐ Password change forzado (contraseña temporal)
       if (data.requires_password_change) {
         onRequirePasswordChange({ nit: nitLimpio, change_token: data.change_token });
         setLoading(false);
         return;
       }
-      // ⭐ 2FA enrollment obligatorio (sin 2FA configurado aún)
       if (data.requires_2fa_enrollment) {
         onRequire2FAEnrollment({
           enrollmentJwt: data.enrollment_jwt,
@@ -290,7 +333,6 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
         setLoading(false);
         return;
       }
-      // ⭐ 2FA verificación (ya tiene 2FA activo)
       if (data.requires_2fa) {
         onRequire2FA({
           pendingToken: data.pending_token,
@@ -301,7 +343,6 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
         setLoading(false);
         return;
       }
-      // Login directo (no debería ocurrir con 2FA obligatorio, fallback por si acaso)
       onLogin({ ...data, nit: nitLimpio, role: loginType === "master" ? "master" : "sub_user" });
     } catch (err) { setError(err.message); setLoading(false); }
   };
@@ -365,6 +406,7 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
     </AuthLayout>
   );
 }
+
 function ForgotPasswordScreen({ onBack }) {
   const [nit, setNit] = useState("");
   const [correo, setCorreo] = useState("");
@@ -425,6 +467,7 @@ function ForgotPasswordScreen({ onBack }) {
     </AuthLayout>
   );
 }
+
 function ResetPasswordScreen({ token, onSuccess }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -494,7 +537,8 @@ function ResetPasswordScreen({ token, onSuccess }) {
     </AuthLayout>
   );
 }
-// ⭐ ChangePasswordScreen (Fase 1) — sin cambios
+
+// ChangePasswordScreen (Fase 1)
 function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCancel }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -638,8 +682,9 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
     </AuthLayout>
   );
 }
+
 // ═══════════════════════════════════════════════════════════════
-// ⭐ ENROLLMENT SCREEN (Fase 2) — configuración inicial 2FA
+// ENROLLMENT SCREEN (Fase 2) — configuración inicial 2FA
 // ═══════════════════════════════════════════════════════════════
 function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
   const { enrollmentJwt, nit, userId } = ctx;
@@ -832,8 +877,9 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
     </AuthLayout>
   );
 }
+
 // ═══════════════════════════════════════════════════════════════
-// ⭐ TWO-FACTOR SCREEN (Fase 2) — verificación TOTP post-login
+// TWO-FACTOR SCREEN (Fase 2) — verificación TOTP post-login
 // ═══════════════════════════════════════════════════════════════
 function TwoFactorScreen({ ctx, onSuccess, onCancel }) {
   const { pendingToken, expiresAt } = ctx;
@@ -946,8 +992,9 @@ function TwoFactorScreen({ ctx, onSuccess, onCancel }) {
     </AuthLayout>
   );
 }
+
 // ═══════════════════════════════════════════════════════════════
-// ⭐ TWO-FACTOR SETTINGS MODAL (Fase 2) — gestión de 2FA desde dashboard
+// TWO-FACTOR SETTINGS MODAL (Fase 2)
 // ═══════════════════════════════════════════════════════════════
 function TwoFactorSettingsModal({ session, authFetch, onClose, onLogoutAfterDisable }) {
   const [status, setStatus] = useState(null);
@@ -1060,8 +1107,9 @@ function TwoFactorSettingsModal({ session, authFetch, onClose, onLogoutAfterDisa
     </div>
   );
 }
+
 // ═══════════════════════════════════════════════════════════════
-// ⭐ MODAL DE GESTIÓN DE SUB-USUARIOS (Fase 1 + botón Reset 2FA Fase 2)
+// MODAL DE GESTIÓN DE SUB-USUARIOS (Fase 1 + reset 2FA Fase 2)
 // ═══════════════════════════════════════════════════════════════
 function SubUsersModal({ session, onClose, authFetch }) {
   const [users, setUsers] = useState([]);
@@ -1130,7 +1178,6 @@ function SubUsersModal({ session, onClose, authFetch }) {
     }
     finally { setDeleting(null); }
   };
-  // ⭐ Reset 2FA del sub-user (Fase 2) — requiere TOTP del master como confirmación
   const handleReset2FA = async (user) => {
     const masterCode = prompt(
       `Para resetear el 2FA de ${user.nombre}, ingresa el código de 6 dígitos de TU app de autenticación.\n\n` +
@@ -1257,12 +1304,13 @@ function SubUsersModal({ session, onClose, authFetch }) {
     </div>
   );
 }
+
 // ═══════════════════════════════════════════════════════════════
-// MODAL DE CONFIGURACIÓN DE APIs (sin cambios Fase 2)
+// MODAL DE CONFIGURACIÓN DE APIs (server-side erpKey)
 // ═══════════════════════════════════════════════════════════════
 function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
   const [dianUrl, setDianUrl] = useState(credentials?.dianUrl || "");
-  const [erpKey, setErpKey] = useState(""); // Server-side encryption: nunca precarga la key del backend
+  const [erpKey, setErpKey] = useState("");
   const [erpUser, setErpUser] = useState(credentials?.erpUser || "");
   const [erpUrl, setErpUrl] = useState(credentials?.erpUrl || SOFTWARE_API_URLS[session.software_contable] || "");
   const [saving, setSaving] = useState(false);
@@ -1343,8 +1391,9 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
     </div>
   );
 }
+
 // ═══════════════════════════════════════════════════════════════
-// COMPONENTES COMPARTIDOS (sin cambios)
+// COMPONENTES COMPARTIDOS
 // ═══════════════════════════════════════════════════════════════
 function Badge({ status }) {
   const S = {
@@ -1355,10 +1404,31 @@ function Badge({ status }) {
   const s = S[status] || { bg: "#fef3c7", color: "#92400e", label: status };
   return <span style={{ background: s.bg, color: s.color, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>{s.label}</span>;
 }
+
+// ⭐ FASE 3 — Badge para estados de rechazo (4 estados)
+function RechazoBadge({ estado }) {
+  const S = {
+    RECHAZO_PENDIENTE:  { bg: "#fef3c7", color: "#92400e", label: "⏳ Pendiente rechazo" },
+    RECHAZADA_DIAN:     { bg: "#fee2e2", color: "#991b1b", label: "✗ Rechazada (RADIAN 031)" },
+    RECHAZADA_INTERNA:  { bg: "#f1f5f9", color: "#475569", label: "🚫 Rechazada (interna)" },
+    RECHAZO_FALLIDO:    { bg: "#fef2f2", color: "#dc2626", label: "⚠ Rechazo falló", border: "1px solid #dc2626" },
+  };
+  const s = S[estado] || { bg: "#f1f5f9", color: "#475569", label: estado || "—" };
+  return (
+    <span style={{
+      background: s.bg, color: s.color,
+      padding: "3px 10px", borderRadius: 20,
+      fontSize: 11, fontWeight: 700, whiteSpace: "nowrap",
+      border: s.border || "none",
+    }}>{s.label}</span>
+  );
+}
+
 function Risk({ level, score }) {
   const c = { bajo: "#16a34a", medio: "#f59e0b", alto: "#ef4444" }[level] || "#6b7280";
   return <span style={{ color: c, fontWeight: 600, fontSize: 12 }}>{score}/100 {(level || "").toUpperCase()}</span>;
 }
+
 function Field({ label, value, mono }) {
   return (
     <div style={{ marginBottom: 10 }}>
@@ -1367,6 +1437,7 @@ function Field({ label, value, mono }) {
     </div>
   );
 }
+
 function SelectField({ label, value, opts, onChange, required, disabled, emptyMsg }) {
   return (
     <div>
@@ -1378,6 +1449,7 @@ function SelectField({ label, value, opts, onChange, required, disabled, emptyMs
     </div>
   );
 }
+
 function TaxLine({ label, amount, percent, warn }) {
   if (!amount || amount <= 0) return null;
   return (
@@ -1387,6 +1459,7 @@ function TaxLine({ label, amount, percent, warn }) {
     </div>
   );
 }
+
 function AiInsights({ inv }) {
   return (
     <div style={{ background: "linear-gradient(135deg, #f5f3ff, #eef2ff)", borderRadius: 10, padding: 14, border: "1px solid #ddd6fe", marginBottom: 16 }}>
@@ -1401,6 +1474,7 @@ function AiInsights({ inv }) {
     </div>
   );
 }
+
 function DianStatus({ cufe, credentials, authFetch, nit }) {
   const [status, setStatus] = useState("idle");
   const [detail, setDetail] = useState("");
@@ -1422,85 +1496,7 @@ function DianStatus({ cufe, credentials, authFetch, nit }) {
   if (status === "valid") return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#dcfce7", border: "1px solid #86efac", fontSize: 12, color: "#166534", fontWeight: 600 }}>✓ Validada por DIAN {detail && `· ${detail}`}</div>;
   return <div style={{ padding: "8px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#991b1b" }}>✗ No validada {detail && `· ${detail}`}</div>;
 }
-function InvoiceDetail({ inv, onCausar, credentials, erpParams, erpLoading, authFetch, session }) {
-  const [selected1, setSelected1] = useState("");
-  const [selected2, setSelected2] = useState("");
-  const [selected3, setSelected3] = useState("");
-  const [notas, setNotas] = useState("");
-  const [saving, setSaving] = useState(false);
-  const retenciones = inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0;
-  const hasErp = credentials?.has_erp_key && erpParams;
-  const erpFields = erpParams?.fields || [];
-  const values = [selected1, selected2, selected3];
-  const setters = [setSelected1, setSelected2, setSelected3];
-  const requiredFields = erpFields.filter((f, i) => f.required).map((f, i) => values[i]);
-  const canCausar = hasErp && requiredFields.every(v => v) && !saving;
-  const handleCausar = async () => {
-    setSaving(true);
-    try {
-      const extras = { notas };
-      erpFields.forEach((f, i) => { if (values[i]) extras[f.key] = values[i]; });
-      await onCausar(inv, extras);
-    } finally { setSaving(false); }
-  };
-  return (
-    <div className="fade-in" style={{ background: "#fff", padding: 20, borderTop: "1px solid #e2e8f0" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
-        <Field label="RECEPTOR" value={inv.receptor} />
-        <Field label="NIT RECEPTOR" value={inv.receptor_nit} />
-        <Field label="MEDIO DE PAGO" value={inv.medio_pago || "No especificado"} />
-        <Field label="FECHA APROBACIÓN" value={dateStr(inv.fecha_aprobacion)} />
-        <Field label="MONEDA" value={inv.moneda || "COP"} />
-        <Field label="EMISOR NIT" value={inv.emisor_nit} />
-      </div>
-      <Field label="CUFE" value={inv.cufe} mono />
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 6 }}>VALIDACIÓN DIAN</div>
-        <DianStatus cufe={inv.cufe} credentials={credentials} authFetch={authFetch} nit={session?.nit} />
-      </div>
-      <AiInsights inv={inv} />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, border: "1px solid #e2e8f0" }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.1em", marginBottom: 10 }}>DESGLOSE TRIBUTARIO</div>
-          <TaxLine label="Subtotal" amount={inv.subtotal} />
-          <TaxLine label="IVA" amount={inv.iva} percent={inv.iva_porcentaje} />
-          {inv.inc > 0 && <TaxLine label="INC" amount={inv.inc} />}
-          <div style={{ borderTop: "2px solid #0f172a", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800 }}><span>TOTAL</span><span>{fmt(inv.total)}</span></div>
-          {retenciones && (
-            <div style={{ marginTop: 10, padding: 10, background: "#fffbeb", borderRadius: 8, borderLeft: "3px solid #f59e0b" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#92400e", letterSpacing: "0.08em", marginBottom: 4 }}>RETENCIONES</div>
-              <TaxLine label="ReteFuente" amount={inv.retefuente} percent={inv.retefuente_porcentaje} warn />
-              <TaxLine label="ReteIVA" amount={inv.reteiva} percent={inv.reteiva_porcentaje} warn />
-              <TaxLine label="ReteICA" amount={inv.reteica} percent={inv.reteica_porcentaje} warn />
-              <div style={{ borderTop: "2px solid #f59e0b", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800 }}><span>NETO A PAGAR</span><span>{fmt(inv.total_a_pagar || inv.total)}</span></div>
-            </div>
-          )}
-        </div>
-        <div style={{ background: hasErp ? "#f0f9ff" : "#fef3c7", borderRadius: 10, padding: 14, border: `1px solid ${hasErp ? "#bae6fd" : "#fbbf24"}` }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: hasErp ? "#0369a1" : "#92400e", letterSpacing: "0.1em", marginBottom: 10 }}>DATOS DE CAUSACIÓN</div>
-          {erpLoading && <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#64748b", textAlign: "center" }}><span className="spin">⟳</span> Cargando parámetros del ERP...</div>}
-          {!hasErp && !erpLoading && <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#92400e" }}>⚠ Conecta el API de tu software contable para ver las opciones de causación</div>}
-          {hasErp && !erpLoading && erpFields.length === 0 && <div style={{ padding: 12, background: "#fff", borderRadius: 6, fontSize: 12, color: "#64748b" }}>No se encontraron parámetros en el ERP</div>}
-          {hasErp && !erpLoading && erpFields.slice(0, 3).map((f, i) => (
-            <div key={f.key} style={{ marginBottom: 10 }}>
-              <SelectField label={f.label} value={values[i]} opts={f.options || []} onChange={setters[i]} required={f.required} />
-            </div>
-          ))}
-          <div>
-            <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>Notas adicionales</div>
-            <textarea value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Observaciones..." rows={2} style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }} />
-          </div>
-        </div>
-      </div>
-      <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button onClick={handleCausar} disabled={!canCausar} style={{ padding: "10px 24px", borderRadius: 8, fontSize: 13, fontWeight: 800, cursor: canCausar ? "pointer" : "not-allowed", background: canCausar ? "#0f172a" : "#94a3b8", color: "#fff", border: "none", opacity: canCausar ? 1 : 0.5 }}>
-          {saving ? "Causando..." : "Causar factura"}
-        </button>
-        {!hasErp && <span style={{ fontSize: 11, color: "#92400e" }}>Conecta tu API ERP para causar</span>}
-      </div>
-    </div>
-  );
-}
+
 function StatCard({ label, value, color, icon, subtitle }) {
   return (
     <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", border: "1px solid #e2e8f0", flex: 1, minWidth: 160 }}>
@@ -1513,6 +1509,7 @@ function StatCard({ label, value, color, icon, subtitle }) {
     </div>
   );
 }
+
 function EmptyState({ icon, title, message }) {
   return (
     <div style={{ textAlign: "center", padding: "80px 20px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
@@ -1522,359 +1519,1124 @@ function EmptyState({ icon, title, message }) {
     </div>
   );
 }
-// ═══════════════════════════════════════════════════════════════
-// COMPUTE dashboardStats (sin cambios)
-// ═══════════════════════════════════════════════════════════════
-function computeDashboardStats(facturas, causadasIds, dateFrom, dateTo) {
-  const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
-  const isCausada = (f) => causadasIds.has(f.cufe) || f.estado === "CAUSADA";
-  const count = facturas.length;
-  const aprobadas = facturas.filter(isApproved);
-  const causadas = facturas.filter(isCausada);
-  const pendientes = aprobadas.filter(f => !isCausada(f));
-  const totalFacturado = facturas.reduce((s, f) => s + (Number(f.total) || 0), 0);
-  const totalNetoPagar = facturas.reduce((s, f) => s + (Number(f.total_a_pagar) || Number(f.total) || 0), 0);
-  const totalIva = facturas.reduce((s, f) => s + (Number(f.iva) || 0), 0);
-  const totalRetefuente = facturas.reduce((s, f) => s + (Number(f.retefuente) || 0), 0);
-  const totalReteiva = facturas.reduce((s, f) => s + (Number(f.reteiva) || 0), 0);
-  const totalReteica = facturas.reduce((s, f) => s + (Number(f.reteica) || 0), 0);
-  const totalRetenciones = totalRetefuente + totalReteiva + totalReteica;
-  const bySupplier = {};
-  facturas.forEach(f => {
-    const key = f.emisor || "(sin emisor)";
-    if (!bySupplier[key]) bySupplier[key] = { emisor: key, emisor_nit: f.emisor_nit, total: 0, count: 0 };
-    bySupplier[key].total += Number(f.total) || 0;
-    bySupplier[key].count += 1;
-  });
-  const topProveedores = Object.values(bySupplier).sort((a, b) => b.total - a.total).slice(0, 10);
-  const byCategoria = {};
-  facturas.forEach(f => {
-    const key = f.categoria || "Sin categorizar";
-    if (!byCategoria[key]) byCategoria[key] = { name: key, value: 0, count: 0 };
-    byCategoria[key].value += Number(f.total) || 0;
-    byCategoria[key].count += 1;
-  });
-  const categorias = Object.values(byCategoria).sort((a, b) => b.value - a.value);
-  const byRisk = { bajo: 0, medio: 0, alto: 0, "sin clasificar": 0 };
-  const byRiskAmount = { bajo: 0, medio: 0, alto: 0, "sin clasificar": 0 };
-  facturas.forEach(f => {
-    const k = (f.risk_level || "sin clasificar").toLowerCase();
-    if (byRisk[k] !== undefined) { byRisk[k] += 1; byRiskAmount[k] += Number(f.total) || 0; }
-    else { byRisk["sin clasificar"] += 1; byRiskAmount["sin clasificar"] += Number(f.total) || 0; }
-  });
-  const riesgoData = [
-    { name: "Bajo", count: byRisk.bajo, monto: byRiskAmount.bajo, color: CHART_COLORS.risk_bajo },
-    { name: "Medio", count: byRisk.medio, monto: byRiskAmount.medio, color: CHART_COLORS.risk_medio },
-    { name: "Alto", count: byRisk.alto, monto: byRiskAmount.alto, color: CHART_COLORS.risk_alto },
-  ].filter(r => r.count > 0);
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE 3 — RECHAZO INFO VIEW (vista para facturas YA rechazadas, reemplaza InvoiceDetail en filas expandidas)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function RechazoInfoView({ inv }) {
+  const isDian = inv.estado === "RECHAZADA_DIAN";
+  const isFallido = inv.estado === "RECHAZO_FALLIDO";
+  const panelBg = isFallido ? "#fef2f2" : (isDian ? "#fef2f2" : "#f8fafc");
+  const panelBorder = isFallido ? "#fecaca" : (isDian ? "#fecaca" : "#e2e8f0");
+  const panelTextColor = isFallido ? "#991b1b" : (isDian ? "#991b1b" : "#475569");
+  return (
+    <div style={{ padding: "20px 24px", background: "#fafbfc", borderTop: "1px solid #e2e8f0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <Field label="RECEPTOR" value={inv.receptor || inv.emisor} />
+        <Field label="NIT" value={inv.nit_emisor} mono />
+        <Field label="FECHA EMISIÓN" value={dateStr(inv.fecha_emision)} />
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <Field label="CUFE" value={inv.cufe} mono />
+      </div>
+
+      <div style={{
+        background: panelBg, border: `1px solid ${panelBorder}`, borderRadius: 12,
+        padding: 18, marginBottom: 14
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: panelTextColor, letterSpacing: "0.1em", marginBottom: 4 }}>
+              {isDian ? "🛑 RECHAZADA EN DIAN (RADIAN 031)" : isFallido ? "⚠ RECHAZO FALLÓ" : "🚫 RECHAZADA INTERNAMENTE"}
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>{motivoLabelByKey(inv.motivo_rechazo)}</div>
+          </div>
+          <RechazoBadge estado={inv.estado} />
+        </div>
+
+        {inv.descripcion_rechazo && (
+          <div style={{ background: "#fff", borderRadius: 8, padding: "10px 12px", marginBottom: 10, border: "1px solid #e2e8f0" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.05em", marginBottom: 4 }}>DESCRIPCIÓN</div>
+            <div style={{ fontSize: 13, color: "#334155", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{inv.descripcion_rechazo}</div>
+          </div>
+        )}
+
+        {inv.fecha_rechazo && (
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
+            <strong>Fecha de rechazo:</strong> {dateStr(inv.fecha_rechazo)} · {new Date(inv.fecha_rechazo).toLocaleTimeString("es-CO")}
+            {inv.rechazo_decided_by && <> · por <strong>{inv.rechazo_decided_by}</strong></>}
+          </div>
+        )}
+
+        {isDian && inv.dian_event_id && (
+          <div style={{ background: "#fff", borderRadius: 8, padding: "10px 12px", border: "1px solid #fecaca", marginTop: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#991b1b", letterSpacing: "0.05em", marginBottom: 6 }}>📡 EVENTO RADIAN 031</div>
+            <div style={{ fontSize: 12, fontFamily: "'Courier New', monospace", color: "#334155", wordBreak: "break-all", marginBottom: 6 }}>
+              <strong>ID:</strong> {inv.dian_event_id}
+            </div>
+            {inv.dian_attached_doc_url && (
+              <a href={inv.dian_attached_doc_url} target="_blank" rel="noopener noreferrer"
+                style={{ display: "inline-block", padding: "6px 12px", background: "#0f172a", color: "#fff", borderRadius: 6, fontSize: 11, fontWeight: 700, textDecoration: "none" }}>
+                📎 Ver documento adjunto
+              </a>
+            )}
+          </div>
+        )}
+
+        {isFallido && inv.rechazo_error_msg && (
+          <div style={{ background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 12px", marginTop: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#991b1b", letterSpacing: "0.05em", marginBottom: 4 }}>ERROR DEL SISTEMA</div>
+            <div style={{ fontSize: 12, color: "#991b1b", fontFamily: "'Courier New', monospace", whiteSpace: "pre-wrap" }}>{inv.rechazo_error_msg}</div>
+            {inv.rechazo_retry_count > 0 && (
+              <div style={{ fontSize: 11, color: "#991b1b", marginTop: 6 }}>Reintentos: {inv.rechazo_retry_count}</div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field label="SUBTOTAL" value={fmt(inv.subtotal)} />
+        <Field label="TOTAL" value={fmt(inv.total)} />
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE 3 — RECHAZO TARJETA (card editable de cada factura pendiente de rechazo en la bandeja)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function RechazoTarjeta({ factura, aiData, aiLoading, selected, onToggleSelect, motivo, onMotivoChange, descripcion, onDescripcionChange, blocked }) {
+  const confLevel = aiData ? getConfLevel(aiData.confianza) : "low";
+  const confColor = CONF_COLORS[confLevel];
+  const confPct = aiData?.confianza ? Math.round(aiData.confianza * 100) : null;
+
+  // Determinar si es RADIAN (a DIAN) o interno (contado/ya pagado)
+  const tipoRechazo = aiData?.tipo_rechazo || (factura.medio_pago === "Contado" ? "INTERNO" : "RADIAN");
+  const esRadian = tipoRechazo === "RADIAN";
+
+  return (
+    <div className="fade-in" style={{
+      background: "#fff", borderRadius: 12, border: `1px solid ${selected ? "#3b82f6" : "#e2e8f0"}`,
+      padding: 18, marginBottom: 12, boxShadow: selected ? "0 0 0 2px rgba(59,130,246,0.15)" : "none",
+      opacity: blocked && !selected ? 0.7 : 1, transition: "all 0.2s"
+    }}>
+      {/* Header con checkbox + factura info + badge */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 14 }}>
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          disabled={blocked}
+          style={{ width: 18, height: 18, marginTop: 4, cursor: blocked ? "not-allowed" : "pointer", accentColor: "#3b82f6" }}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 4 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", marginBottom: 2 }}>
+                {factura.numero_factura || "—"}
+              </div>
+              <div style={{ fontSize: 12, color: "#475569", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {factura.emisor || "—"} · NIT {factura.nit_emisor || "—"}
+              </div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>{fmt(factura.total)}</div>
+              <div style={{ marginTop: 4 }}><RechazoBadge estado={factura.estado} /></div>
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>
+            CUFE: <span style={{ fontFamily: "monospace" }}>{factura.cufe?.slice(0, 24)}…</span> · Emitida {dateStr(factura.fecha_emision)}
+          </div>
+        </div>
+      </div>
+
+      {/* Banner confianza IA */}
+      {aiLoading && (
+        <div style={{ padding: "10px 14px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+          <span className="spin">⟳</span> Analizando factura con IA...
+        </div>
+      )}
+      {!aiLoading && aiData && (
+        <div style={{
+          padding: "10px 14px", borderRadius: 8,
+          background: confColor.bg, border: `1px solid ${confColor.border}`,
+          fontSize: 12, color: confColor.text, marginBottom: 12, lineHeight: 1.5
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <span style={{ fontWeight: 700 }}>🧠 IA: {confColor.label}</span>
+            {confPct !== null && <span style={{ fontWeight: 800 }}>{confPct}%</span>}
+          </div>
+          {aiData.razonamiento && <div style={{ fontSize: 11 }}>{aiData.razonamiento}</div>}
+        </div>
+      )}
+
+      {/* Banner tipo rechazo (RADIAN vs Interno) */}
+      <div style={{
+        padding: "8px 12px", borderRadius: 6,
+        background: esRadian ? "#fee2e2" : "#f1f5f9",
+        border: `1px solid ${esRadian ? "#fecaca" : "#cbd5e1"}`,
+        fontSize: 11, color: esRadian ? "#991b1b" : "#475569",
+        marginBottom: 12, display: "flex", alignItems: "center", gap: 6
+      }}>
+        {esRadian ? (
+          <>📡 <strong>Se enviará a DIAN como evento RADIAN 031.</strong> Plazo legal: 3 días hábiles desde recepción.</>
+        ) : (
+          <>💵 <strong>Rechazo interno.</strong> No se envía a DIAN (factura ya pagada de contado o fuera de plazo RADIAN).</>
+        )}
+      </div>
+
+      {/* Editor: motivo + descripción */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>
+            MOTIVO <span style={{ color: "#ef4444" }}>*</span>
+          </div>
+          <select
+            value={motivo}
+            onChange={(e) => onMotivoChange(e.target.value)}
+            style={{ width: "100%", padding: "9px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, background: "#fff", boxSizing: "border-box" }}
+          >
+            <option value="">Seleccionar motivo...</option>
+            {MOTIVOS_RECHAZO.map(m => (
+              <option key={m.key} value={m.key}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+            <span style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em" }}>
+              DESCRIPCIÓN <span style={{ color: "#ef4444" }}>*</span>
+            </span>
+            <span style={{ fontSize: 10, color: descripcion.length > 450 ? "#dc2626" : "#94a3b8" }}>
+              {descripcion.length}/500
+            </span>
+          </div>
+          <textarea
+            value={descripcion}
+            onChange={(e) => onDescripcionChange(e.target.value.slice(0, 500))}
+            placeholder="Explica claramente el motivo del rechazo (visible para el emisor en RADIAN)..."
+            rows={3}
+            style={{
+              width: "100%", padding: "9px 12px", borderRadius: 8,
+              border: "1px solid #e2e8f0", fontSize: 13,
+              fontFamily: "inherit", resize: "vertical", boxSizing: "border-box", lineHeight: 1.5
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Evidencia de la IA */}
+      {aiData?.evidencia && Array.isArray(aiData.evidencia) && aiData.evidencia.length > 0 && (
+        <div style={{ marginTop: 8, padding: "8px 12px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, fontSize: 11, color: "#0369a1" }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>🔍 Evidencia detectada:</div>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+            {aiData.evidencia.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Warnings de la IA */}
+      {aiData?.warnings && Array.isArray(aiData.warnings) && aiData.warnings.length > 0 && (
+        <div style={{ marginTop: 8, padding: "8px 12px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontSize: 11, color: "#92400e" }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠ Advertencias:</div>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.5 }}>
+            {aiData.warnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {blocked && (
+        <div style={{ marginTop: 10, padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, fontSize: 11, color: "#991b1b" }}>
+          🔒 Confianza muy baja (&lt;{Math.round(CONFIDENCE_BLOCKED * 100)}%). Edita motivo y descripción manualmente para habilitar la selección.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE 3 — RECHAZO CONFIRM MODAL (escribir "ENVIAR" para confirmar bulk)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function RechazoConfirmModal({ items, onConfirm, onClose, processing }) {
+  const [confirmText, setConfirmText] = useState("");
+  const isReady = confirmText === "ENVIAR";
+  const totalAmount = items.reduce((s, x) => s + (Number(x.factura.total) || 0), 0);
+  const radianCount = items.filter(x => (x.aiData?.tipo_rechazo || (x.factura.medio_pago === "Contado" ? "INTERNO" : "RADIAN")) === "RADIAN").length;
+  const internoCount = items.length - radianCount;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)",
+      zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20
+    }}>
+      <div className="fade-in" style={{
+        background: "#fff", borderRadius: 16, padding: 28, maxWidth: 580, width: "100%",
+        maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)"
+      }}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>CONFIRMAR RECHAZO MASIVO</div>
+          <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4, color: "#0f172a" }}>
+            🚫 Vas a rechazar {items.length} factura{items.length !== 1 ? "s" : ""}
+          </div>
+        </div>
+
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 12, color: "#991b1b", lineHeight: 1.6 }}>
+          <strong>⚠ Acción irreversible.</strong> Una vez enviada al RADIAN 031, el rechazo no se puede deshacer desde este sistema.
+          {radianCount > 0 && <><br />📡 <strong>{radianCount}</strong> factura{radianCount !== 1 ? "s" : ""} se enviará{radianCount !== 1 ? "n" : ""} a DIAN.</>}
+          {internoCount > 0 && <><br />💵 <strong>{internoCount}</strong> rechazo{internoCount !== 1 ? "s" : ""} interno{internoCount !== 1 ? "s" : ""} (no van a DIAN).</>}
+        </div>
+
+        <div style={{ background: "#f8fafc", borderRadius: 10, padding: 12, marginBottom: 16, maxHeight: 240, overflowY: "auto", border: "1px solid #e2e8f0" }}>
+          {items.map((x, i) => (
+            <div key={x.factura.cufe} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "8px 0", borderBottom: i < items.length - 1 ? "1px solid #e2e8f0" : "none", fontSize: 12
+            }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 700, color: "#0f172a" }}>{x.factura.numero_factura}</div>
+                <div style={{ color: "#64748b", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {motivoLabelByKey(x.motivo)} · {x.factura.emisor}
+                </div>
+              </div>
+              <div style={{ fontWeight: 700, color: "#0f172a", marginLeft: 12 }}>{fmt(x.factura.total)}</div>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0 4px", borderTop: "2px solid #cbd5e1", marginTop: 4, fontSize: 13, fontWeight: 800 }}>
+            <span>TOTAL</span>
+            <span>{fmt(totalAmount)}</span>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6 }}>
+            Para confirmar, escribe <strong style={{ fontFamily: "monospace", color: "#dc2626" }}>ENVIAR</strong>:
+          </label>
+          <input
+            type="text"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="ENVIAR"
+            disabled={processing}
+            autoFocus
+            style={{
+              width: "100%", padding: "10px 14px", borderRadius: 10,
+              border: `1px solid ${isReady ? "#16a34a" : "#e2e8f0"}`, fontSize: 14,
+              fontFamily: "monospace", textAlign: "center", letterSpacing: "0.2em",
+              background: isReady ? "#f0fdf4" : "#fff", boxSizing: "border-box"
+            }}
+          />
+        </div>
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onClose} disabled={processing}
+            style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: processing ? "not-allowed" : "pointer", color: "#475569" }}>
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={!isReady || processing}
+            style={{
+              padding: "10px 24px", borderRadius: 8, border: "none",
+              background: !isReady || processing ? "#94a3b8" : "#dc2626",
+              color: "#fff", fontSize: 13, fontWeight: 700,
+              cursor: !isReady || processing ? "not-allowed" : "pointer"
+            }}
+          >
+            {processing ? "Enviando..." : `Causar ${items.length} rechazo${items.length !== 1 ? "s" : ""}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE 3 — RECHAZOS BANDEJA (vista principal de la pestaña 🚫 Rechazos)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function RechazosBandeja({ session, authFetch, facturas, onRefresh }) {
+  const pendientes = useMemo(
+    () => (facturas || []).filter(f => f.estado === "RECHAZO_PENDIENTE"),
+    [facturas]
+  );
+
+  const [aiCache, setAiCache] = useState({});       // { cufe: { confianza, motivo_sugerido, descripcion_sugerida, ... } }
+  const [aiLoading, setAiLoading] = useState({});    // { cufe: bool }
+  const [selections, setSelections] = useState({}); // { cufe: bool }
+  const [motivos, setMotivos] = useState({});       // { cufe: motivoKey }
+  const [descripciones, setDescripciones] = useState({}); // { cufe: string }
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [processing, setProcessing] = useState(false);
+
+  // Auto-fetch recomendaciones al montar / cuando cambia la lista de pendientes
+  useEffect(() => {
+    let cancelled = false;
+    pendientes.forEach(async (f) => {
+      const cufe = f.cufe;
+      if (!cufe || aiCache[cufe] || aiLoading[cufe]) return;
+
+      // 1) Cache desde Sheets (ai_recomendacion_json)
+      if (f.ai_recomendacion_json) {
+        try {
+          const parsed = typeof f.ai_recomendacion_json === "string"
+            ? JSON.parse(f.ai_recomendacion_json)
+            : f.ai_recomendacion_json;
+          if (parsed && typeof parsed === "object") {
+            if (cancelled) return;
+            setAiCache(prev => ({ ...prev, [cufe]: parsed }));
+            applyAiData(cufe, parsed);
+            return;
+          }
+        } catch (e) {
+          console.warn("ai_recomendacion_json malformado para", cufe);
+        }
+      }
+
+      // 2) Fetch al webhook
+      setAiLoading(prev => ({ ...prev, [cufe]: true }));
+      try {
+        const { data } = await authFetch(CONFIG.RECHAZO_RECOMENDAR_URL, {
+          method: "POST",
+          body: JSON.stringify({ nit: session.nit, cufe }),
+        });
+        if (cancelled) return;
+        if (data && !data.error) {
+          setAiCache(prev => ({ ...prev, [cufe]: data }));
+          applyAiData(cufe, data);
+        }
+      } catch (e) {
+        if (e.message !== "SESSION_EXPIRED") console.warn("Error obteniendo recomendación:", e.message);
+      } finally {
+        if (!cancelled) setAiLoading(prev => ({ ...prev, [cufe]: false }));
+      }
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line
+  }, [pendientes.map(f => f.cufe).join("|")]);
+
+  function applyAiData(cufe, data) {
+    if (!data) return;
+    if (data.motivo_sugerido) {
+      setMotivos(prev => prev[cufe] ? prev : { ...prev, [cufe]: data.motivo_sugerido });
+    }
+    if (data.descripcion_sugerida) {
+      setDescripciones(prev => prev[cufe] ? prev : { ...prev, [cufe]: data.descripcion_sugerida });
+    }
+    if (typeof data.confianza === "number" && data.confianza >= CONFIDENCE_AUTO_SELECT) {
+      setSelections(prev => prev[cufe] !== undefined ? prev : { ...prev, [cufe]: true });
+    }
+  }
+
+  const highConfidenceCount = useMemo(() =>
+    pendientes.filter(f => {
+      const a = aiCache[f.cufe];
+      return a && typeof a.confianza === "number" && a.confianza >= CONFIDENCE_AUTO_SELECT;
+    }).length
+  , [pendientes, aiCache]);
+
+  const selectedCufes = useMemo(() =>
+    Object.keys(selections).filter(c => selections[c])
+  , [selections]);
+
+  const selectedItems = useMemo(() =>
+    selectedCufes.map(cufe => {
+      const factura = pendientes.find(f => f.cufe === cufe);
+      return factura ? {
+        factura,
+        aiData: aiCache[cufe],
+        motivo: motivos[cufe] || "",
+        descripcion: descripciones[cufe] || "",
+      } : null;
+    }).filter(Boolean)
+  , [selectedCufes, pendientes, aiCache, motivos, descripciones]);
+
+  const selectedTotal = useMemo(() =>
+    selectedItems.reduce((s, x) => s + (Number(x.factura.total) || 0), 0)
+  , [selectedItems]);
+
+  const canProceed = selectedItems.length > 0 && selectedItems.every(x => x.motivo && x.descripcion.trim().length >= 5);
+  const validationMsg = !canProceed && selectedItems.length > 0
+    ? "Cada factura seleccionada requiere motivo y descripción (mínimo 5 caracteres)"
+    : "";
+
+  function handleSelectHighConf() {
+    const next = { ...selections };
+    pendientes.forEach(f => {
+      const a = aiCache[f.cufe];
+      if (a && typeof a.confianza === "number" && a.confianza >= CONFIDENCE_AUTO_SELECT) {
+        next[f.cufe] = true;
+      }
+    });
+    setSelections(next);
+  }
+
+  function handleClearSelection() {
+    setSelections({});
+  }
+
+  function handleToggleSelect(cufe) {
+    setSelections(prev => ({ ...prev, [cufe]: !prev[cufe] }));
+  }
+
+  async function handleConfirm() {
+    setProcessing(true);
+    try {
+      const { data } = await authFetch(CONFIG.CAUSAR_RECHAZO_LOTE_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          nit: session.nit,
+          items: selectedItems.map(x => ({
+            cufe: x.factura.cufe,
+            motivo: x.motivo,
+            descripcion: x.descripcion.trim(),
+          })),
+        }),
+      });
+      const succ = data?.exitos || data?.success_count || 0;
+      const fail = data?.fallos || data?.failed_count || 0;
+      const messages = [];
+      if (succ > 0) messages.push(`✓ ${succ} rechazo${succ !== 1 ? "s" : ""} procesado${succ !== 1 ? "s" : ""} correctamente.`);
+      if (fail > 0) messages.push(`⚠ ${fail} fallaron — revisa la lista para detalles.`);
+      if (messages.length === 0) messages.push("Procesado. Revisa la bandeja.");
+      alert(messages.join("\n"));
+      setSelections({});
+      setShowConfirm(false);
+      if (onRefresh) await onRefresh();
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") {
+        alert("Error al procesar el lote: " + e.message);
+      }
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  if (pendientes.length === 0) {
+    return (
+      <EmptyState
+        icon="✨"
+        title="No hay rechazos pendientes"
+        message="Cuando rechaces facturas desde el correo de aprobación, aparecerán aquí para que las revises antes de enviarlas a DIAN."
+      />
+    );
+  }
+
+  return (
+    <div style={{ paddingBottom: 100 }}>
+      {/* Banner plazo legal */}
+      <div style={{
+        background: "linear-gradient(135deg, #fef3c7, #fde68a)",
+        border: "1px solid #fbbf24", borderRadius: 12, padding: "14px 18px", marginBottom: 16,
+        display: "flex", alignItems: "center", gap: 12
+      }}>
+        <span style={{ fontSize: 22 }}>⏰</span>
+        <div style={{ fontSize: 12, color: "#92400e", lineHeight: 1.5 }}>
+          <strong>Plazo legal:</strong> 3 días hábiles desde la recepción de la factura para rechazarla vía RADIAN 031.
+          Pasado ese plazo, sólo procede rechazo interno (no se envía a DIAN).
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      <div style={{
+        background: "#fff", borderRadius: 12, padding: "12px 16px", marginBottom: 14,
+        border: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap"
+      }}>
+        <div style={{ fontSize: 13, color: "#475569" }}>
+          <strong style={{ color: "#0f172a" }}>{pendientes.length}</strong> factura{pendientes.length !== 1 ? "s" : ""} pendiente{pendientes.length !== 1 ? "s" : ""}
+          {highConfidenceCount > 0 && <> · <span style={{ color: "#16a34a", fontWeight: 700 }}>{highConfidenceCount}</span> con alta confianza IA</>}
+        </div>
+        <div style={{ flex: 1 }} />
+        {highConfidenceCount > 0 && (
+          <button onClick={handleSelectHighConf} style={{
+            padding: "7px 14px", borderRadius: 8, border: "1px solid #16a34a",
+            background: "#f0fdf4", color: "#15803d", fontSize: 12, fontWeight: 700, cursor: "pointer"
+          }}>
+            ✓ Seleccionar las {highConfidenceCount} de alta confianza
+          </button>
+        )}
+        {selectedCufes.length > 0 && (
+          <button onClick={handleClearSelection} style={{
+            padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0",
+            background: "#fff", color: "#475569", fontSize: 12, fontWeight: 600, cursor: "pointer"
+          }}>
+            Limpiar selección
+          </button>
+        )}
+      </div>
+
+      {/* Lista de tarjetas */}
+      {pendientes.map(f => {
+        const aiData = aiCache[f.cufe];
+        const isLoading = aiLoading[f.cufe];
+        const conf = aiData?.confianza;
+        const blocked = typeof conf === "number" && conf < CONFIDENCE_BLOCKED && !motivos[f.cufe];
+        return (
+          <RechazoTarjeta
+            key={f.cufe}
+            factura={f}
+            aiData={aiData}
+            aiLoading={isLoading}
+            selected={!!selections[f.cufe]}
+            onToggleSelect={() => handleToggleSelect(f.cufe)}
+            motivo={motivos[f.cufe] || ""}
+            onMotivoChange={(v) => setMotivos(prev => ({ ...prev, [f.cufe]: v }))}
+            descripcion={descripciones[f.cufe] || ""}
+            onDescripcionChange={(v) => setDescripciones(prev => ({ ...prev, [f.cufe]: v }))}
+            blocked={blocked}
+          />
+        );
+      })}
+
+      {/* Footer pegajoso */}
+      {selectedCufes.length > 0 && (
+        <div style={{
+          position: "fixed", bottom: 0, left: 0, right: 0,
+          background: "#fff", borderTop: "1px solid #e2e8f0",
+          padding: "14px 24px", boxShadow: "0 -4px 20px rgba(0,0,0,0.08)",
+          display: "flex", alignItems: "center", gap: 14, zIndex: 50
+        }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>SELECCIONADAS</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>
+              {selectedCufes.length} factura{selectedCufes.length !== 1 ? "s" : ""} · {fmt(selectedTotal)}
+            </div>
+          </div>
+          <div style={{ flex: 1, fontSize: 11, color: validationMsg ? "#dc2626" : "#94a3b8" }}>
+            {validationMsg}
+          </div>
+          <button
+            onClick={() => setShowConfirm(true)}
+            disabled={!canProceed}
+            style={{
+              padding: "12px 24px", borderRadius: 10, border: "none",
+              background: !canProceed ? "#94a3b8" : "#dc2626",
+              color: "#fff", fontSize: 14, fontWeight: 700,
+              cursor: !canProceed ? "not-allowed" : "pointer",
+              whiteSpace: "nowrap"
+            }}
+          >
+            🚫 Causar rechazos
+          </button>
+        </div>
+      )}
+
+      {showConfirm && (
+        <RechazoConfirmModal
+          items={selectedItems}
+          onConfirm={handleConfirm}
+          onClose={() => !processing && setShowConfirm(false)}
+          processing={processing}
+        />
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// INVOICE DETAIL (vista expandida normal — para facturas APROBADAS pendientes de causación)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function InvoiceDetail({ inv, session, credentials, authFetch, onCausada }) {
+  const [erpParams, setErpParams] = useState({ terceros: [], cuentas: [], cecos: [] });
+  const [loadingParams, setLoadingParams] = useState(false);
+  const [tercero, setTercero] = useState("");
+  const [cuenta, setCuenta] = useState("");
+  const [centroCosto, setCentroCosto] = useState("");
+  const [observaciones, setObservaciones] = useState("");
+  const [causando, setCausando] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!credentials?.has_erp_key) return;
+    setLoadingParams(true);
+    authFetch(CONFIG.ERP_PARAMS_URL, {
+      method: "POST",
+      body: JSON.stringify({ nit: session.nit, nit_emisor: inv.nit_emisor }),
+    })
+      .then(({ data }) => {
+        setErpParams({
+          terceros: data.terceros || [],
+          cuentas: data.cuentas || [],
+          cecos: data.cecos || [],
+        });
+        // Pre-fill if a tercero matches the emitter's NIT
+        const match = (data.terceros || []).find(t => t.id === inv.nit_emisor || t.nit === inv.nit_emisor);
+        if (match) setTercero(match.id);
+        // Pre-fill cuenta from AI suggestion
+        if (inv.cuenta_contable_sugerida && (data.cuentas || []).some(c => c.id === inv.cuenta_contable_sugerida)) {
+          setCuenta(inv.cuenta_contable_sugerida);
+        }
+        if (inv.centro_costo_sugerido && (data.cecos || []).some(c => c.id === inv.centro_costo_sugerido)) {
+          setCentroCosto(inv.centro_costo_sugerido);
+        }
+      })
+      .catch(e => {
+        if (e.message !== "SESSION_EXPIRED") console.warn("ERP params error:", e.message);
+      })
+      .finally(() => setLoadingParams(false));
+  }, [inv.cufe, credentials?.has_erp_key]);
+
+  async function handleCausar() {
+    if (!tercero || !cuenta) { setError("Tercero y cuenta son requeridos"); return; }
+    setError("");
+    setCausando(true);
+    try {
+      const { data } = await authFetch(CONFIG.CAUSAR_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          nit: session.nit,
+          cufe: inv.cufe,
+          tercero, cuenta, centro_costo: centroCosto,
+          observaciones,
+        }),
+      });
+      if (!data.success) {
+        setError(data.error || "Error al causar la factura");
+        return;
+      }
+      if (onCausada) onCausada(inv.cufe, data);
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") setError(e.message);
+    } finally {
+      setCausando(false);
+    }
+  }
+
+  return (
+    <div style={{ padding: "20px 24px", background: "#fafbfc", borderTop: "1px solid #e2e8f0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 20 }}>
+        {/* IZQ — info factura + IA */}
+        <div>
+          <div style={{ marginBottom: 12 }}>
+            <DianStatus cufe={inv.cufe} credentials={credentials} authFetch={authFetch} nit={session.nit} />
+          </div>
+          <AiInsights inv={inv} />
+          <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: "1px solid #e2e8f0", marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.1em", marginBottom: 10 }}>📄 DATOS DE LA FACTURA</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }}>
+              <Field label="EMISOR" value={inv.emisor} />
+              <Field label="NIT EMISOR" value={inv.nit_emisor} mono />
+              <Field label="Nº FACTURA" value={inv.numero_factura} />
+              <Field label="FECHA EMISIÓN" value={dateStr(inv.fecha_emision)} />
+              <Field label="MEDIO DE PAGO" value={inv.medio_pago} />
+              <Field label="VENCIMIENTO" value={dateStr(inv.fecha_vencimiento)} />
+            </div>
+            <div style={{ marginTop: 4 }}>
+              <Field label="CUFE" value={inv.cufe} mono />
+            </div>
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: "1px solid #e2e8f0" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.1em", marginBottom: 10 }}>💰 DESGLOSE TRIBUTARIO</div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13 }}>
+              <span style={{ color: "#475569" }}>Subtotal</span>
+              <span style={{ fontWeight: 700 }}>{fmt(inv.subtotal)}</span>
+            </div>
+            <TaxLine label="IVA" amount={inv.iva} percent={inv.iva_porcentaje} />
+            <TaxLine label="ICA" amount={inv.ica} percent={inv.ica_porcentaje} />
+            <TaxLine label="Retefuente" amount={inv.retefuente} percent={inv.retefuente_porcentaje} warn />
+            <TaxLine label="Reteiva" amount={inv.reteiva} percent={inv.reteiva_porcentaje} warn />
+            <TaxLine label="Reteica" amount={inv.reteica} percent={inv.reteica_porcentaje} warn />
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 0", marginTop: 6, borderTop: "2px solid #cbd5e1", fontSize: 14, fontWeight: 800 }}>
+              <span>TOTAL</span>
+              <span>{fmt(inv.total)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* DER — editor de causación */}
+        <div>
+          <div style={{ background: "#fff", borderRadius: 10, padding: 16, border: "1px solid #e2e8f0" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", letterSpacing: "0.1em", marginBottom: 12 }}>⚙ CAUSACIÓN EN {session.software_contable?.toUpperCase()}</div>
+
+            {!credentials?.has_erp_key && (
+              <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#92400e", marginBottom: 12 }}>
+                ⚠ Conecta el API de tu ERP para habilitar la causación.
+              </div>
+            )}
+
+            {loadingParams && (
+              <div style={{ padding: 12, fontSize: 12, color: "#64748b" }}><span className="spin">⟳</span> Cargando parámetros del ERP...</div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
+              <SelectField
+                label="TERCERO"
+                value={tercero}
+                opts={erpParams.terceros.map(t => ({ id: t.id, label: `${t.nombre || t.razon_social || t.id}${t.nit ? ` (${t.nit})` : ""}` }))}
+                onChange={setTercero}
+                required
+                disabled={!credentials?.has_erp_key || causando}
+              />
+              <SelectField
+                label="CUENTA CONTABLE"
+                value={cuenta}
+                opts={erpParams.cuentas.map(c => ({ id: c.id, label: `${c.codigo || c.id} — ${c.nombre || c.descripcion}` }))}
+                onChange={setCuenta}
+                required
+                disabled={!credentials?.has_erp_key || causando}
+              />
+              {erpParams.cecos.length > 0 && (
+                <SelectField
+                  label="CENTRO DE COSTO"
+                  value={centroCosto}
+                  opts={erpParams.cecos.map(c => ({ id: c.id, label: c.nombre || c.descripcion || c.id }))}
+                  onChange={setCentroCosto}
+                  disabled={!credentials?.has_erp_key || causando}
+                />
+              )}
+              <div>
+                <div style={{ fontSize: 10, color: "#64748b", fontWeight: 600, letterSpacing: "0.05em", marginBottom: 4 }}>OBSERVACIONES</div>
+                <textarea
+                  value={observaciones}
+                  onChange={(e) => setObservaciones(e.target.value)}
+                  rows={2}
+                  disabled={causando}
+                  placeholder="Notas internas (opcional)"
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
+                />
+              </div>
+            </div>
+
+            {error && (
+              <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>
+            )}
+
+            <button
+              onClick={handleCausar}
+              disabled={!credentials?.has_erp_key || causando || !tercero || !cuenta}
+              style={{
+                width: "100%", padding: 12, borderRadius: 10, border: "none",
+                background: !credentials?.has_erp_key || causando || !tercero || !cuenta ? "#94a3b8" : "#0f172a",
+                color: "#fff", fontSize: 13, fontWeight: 700,
+                cursor: !credentials?.has_erp_key || causando || !tercero || !cuenta ? "not-allowed" : "pointer"
+              }}
+            >
+              {causando ? "Causando..." : "✓ Causar factura en " + (session.software_contable || "ERP")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// DASHBOARD STATS COMPUTATION
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function computeDashboardStats(facturas) {
+  const F = facturas || [];
+  const totalFacturas = F.length;
+  const causadas = F.filter(f => f.estado === "CAUSADA").length;
+  const aprobadas = F.filter(f => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE").length;
+  const rechazadas = F.filter(f => ["RECHAZADA_DIAN", "RECHAZADA_INTERNA"].includes(f.estado)).length;
+  const totalMonto = F.reduce((s, f) => s + (Number(f.total) || 0), 0);
+  const totalCausado = F.filter(f => f.estado === "CAUSADA").reduce((s, f) => s + (Number(f.total) || 0), 0);
+
+  // Por mes (últimos 6 meses)
   const byMonth = {};
-  facturas.forEach(f => {
+  F.forEach(f => {
     const d = dateFromInv(f);
-    if (!d || isNaN(d.getTime())) return;
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    if (!byMonth[key]) byMonth[key] = { key, label: monthLabel(d), timestamp: new Date(d.getFullYear(), d.getMonth(), 1).getTime(), aprobadas: 0, causadas: 0, monto: 0 };
-    if (isCausada(f)) byMonth[key].causadas += 1;
-    else if (isApproved(f)) byMonth[key].aprobadas += 1;
+    if (!d) return;
+    const key = monthLabel(d);
+    if (!byMonth[key]) byMonth[key] = { mes: key, facturas: 0, monto: 0, _date: d.getTime() };
+    byMonth[key].facturas += 1;
     byMonth[key].monto += Number(f.total) || 0;
   });
-  const evolucionMensual = Object.values(byMonth).sort((a, b) => a.timestamp - b.timestamp);
-  const retencionesPorMes = {};
-  facturas.forEach(f => {
-    const d = dateFromInv(f);
-    if (!d || isNaN(d.getTime())) return;
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    if (!retencionesPorMes[key]) retencionesPorMes[key] = { key, label: monthLabel(d), timestamp: new Date(d.getFullYear(), d.getMonth(), 1).getTime(), retefuente: 0, reteiva: 0, reteica: 0 };
-    retencionesPorMes[key].retefuente += Number(f.retefuente) || 0;
-    retencionesPorMes[key].reteiva += Number(f.reteiva) || 0;
-    retencionesPorMes[key].reteica += Number(f.reteica) || 0;
+  const monthly = Object.values(byMonth).sort((a, b) => a._date - b._date).slice(-6);
+
+  // Por categoría
+  const byCategoria = {};
+  F.forEach(f => {
+    const k = f.categoria || "Sin categoría";
+    byCategoria[k] = (byCategoria[k] || 0) + (Number(f.total) || 0);
   });
-  const retencionesData = Object.values(retencionesPorMes).filter(r => r.retefuente + r.reteiva + r.reteica > 0).sort((a, b) => a.timestamp - b.timestamp);
-  const ticketPromedio = count > 0 ? totalFacturado / count : 0;
+  const categorias = Object.entries(byCategoria).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+
+  // Top emisores
+  const byEmisor = {};
+  F.forEach(f => {
+    const k = f.emisor || "—";
+    if (!byEmisor[k]) byEmisor[k] = { emisor: k, count: 0, monto: 0 };
+    byEmisor[k].count += 1;
+    byEmisor[k].monto += Number(f.total) || 0;
+  });
+  const topEmisores = Object.values(byEmisor).sort((a, b) => b.monto - a.monto).slice(0, 5);
+
+  // Por riesgo
+  const byRisk = { bajo: 0, medio: 0, alto: 0 };
+  F.forEach(f => { if (byRisk[f.risk_level] !== undefined) byRisk[f.risk_level]++; });
+  const riskData = [
+    { name: "Bajo", value: byRisk.bajo, color: CHART_COLORS.risk_bajo },
+    { name: "Medio", value: byRisk.medio, color: CHART_COLORS.risk_medio },
+    { name: "Alto", value: byRisk.alto, color: CHART_COLORS.risk_alto },
+  ].filter(x => x.value > 0);
+
   return {
-    count, count_aprobadas: aprobadas.length, count_pendientes: pendientes.length, count_causadas: causadas.length,
-    totalFacturado, totalNetoPagar, totalIva, totalRetefuente, totalReteiva, totalReteica, totalRetenciones,
-    ticketPromedio, topProveedores, categorias, riesgoData, evolucionMensual, retencionesData,
-    periodo: { desde: dateFrom || null, hasta: dateTo || null, filtro_activo: !!(dateFrom || dateTo) },
+    totalFacturas, causadas, aprobadas, rechazadas, totalMonto, totalCausado,
+    monthly, categorias, topEmisores, riskData,
   };
 }
-// ═══════════════════════════════════════════════════════════════
-// DASHBOARD TAB (sin cambios)
-// ═══════════════════════════════════════════════════════════════
-function ChartCard({ title, subtitle, children, height = 280 }) {
+
+function ChartCard({ title, subtitle, children, height = 260 }) {
   return (
-    <div style={{ background: "#fff", borderRadius: 12, padding: "16px 18px", border: "1px solid #e2e8f0" }}>
-      <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", letterSpacing: "0.1em" }}>{title}</div>
+    <div style={{ background: "#fff", borderRadius: 12, padding: 18, border: "1px solid #e2e8f0" }}>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{title}</div>
         {subtitle && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{subtitle}</div>}
       </div>
-      <div style={{ width: "100%", height }}>{children}</div>
+      <div style={{ width: "100%", height }}>
+        <ResponsiveContainer>{children}</ResponsiveContainer>
+      </div>
     </div>
   );
 }
-function DashboardView({ stats, loading }) {
-  if (loading) return <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando datos...</div>;
-  if (stats.count === 0) return <EmptyState icon="📊" title="Sin datos para mostrar" message="No hay facturas en el período seleccionado. Ajusta los filtros o espera que lleguen facturas procesadas." />;
-  const periodoLabel = stats.periodo.filtro_activo
-    ? `${stats.periodo.desde ? dateStr(stats.periodo.desde) : "inicio"} — ${stats.periodo.hasta ? dateStr(stats.periodo.hasta) : "hoy"}`
-    : "Todas las facturas";
+
+function DashboardView({ facturas }) {
+  const stats = useMemo(() => computeDashboardStats(facturas), [facturas]);
+  if (!facturas || facturas.length === 0) {
+    return <EmptyState icon="📊" title="Sin datos para mostrar" message="Cuando proceses facturas, aparecerán métricas y gráficas aquí." />;
+  }
   return (
-    <React.Fragment>
-      <div style={{ background: "#0f172a", color: "#e2e8f0", padding: "10px 16px", borderRadius: 10, marginBottom: 14, fontSize: 12, display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 14 }}>📅</span>
-        <span><strong>{periodoLabel}</strong> · {stats.count} {stats.count === 1 ? "factura" : "facturas"} en el análisis</span>
+    <div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+        <StatCard label="TOTAL FACTURAS" value={stats.totalFacturas} icon="📄" color="#0f172a" />
+        <StatCard label="CAUSADAS" value={stats.causadas} icon="✓" color="#16a34a" subtitle={`${stats.totalFacturas > 0 ? Math.round(stats.causadas / stats.totalFacturas * 100) : 0}% del total`} />
+        <StatCard label="PENDIENTES" value={stats.aprobadas} icon="⏳" color="#f59e0b" />
+        <StatCard label="RECHAZADAS" value={stats.rechazadas} icon="🚫" color="#dc2626" />
+        <StatCard label="MONTO TOTAL" value={fmtCompact(stats.totalMonto)} icon="💰" color="#0f172a" />
+        <StatCard label="CAUSADO" value={fmtCompact(stats.totalCausado)} icon="✅" color="#16a34a" />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
-        <StatCard icon="💰" label="TOTAL FACTURADO" value={fmtCompact(stats.totalFacturado)} subtitle={`${stats.count} facturas`} />
-        <StatCard icon="🎯" label="NETO A PAGAR" value={fmtCompact(stats.totalNetoPagar)} subtitle={`Retenciones: ${fmtCompact(stats.totalRetenciones)}`} />
-        <StatCard icon="⏳" label="PENDIENTES DE CAUSAR" value={stats.count_pendientes} color="#f59e0b" subtitle={`${stats.count_causadas} causadas`} />
-        <StatCard icon="📊" label="TICKET PROMEDIO" value={fmtCompact(stats.ticketPromedio)} subtitle="Por factura" />
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14, marginBottom: 14 }}>
-        <ChartCard title="📅 EVOLUCIÓN MENSUAL" subtitle="Facturas aprobadas vs causadas por mes">
-          {stats.evolucionMensual.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin datos de fechas</div>
-          ) : (
-            <ResponsiveContainer>
-              <BarChart data={stats.evolucionMensual} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#64748b" }} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="aprobadas" stackId="a" fill={CHART_COLORS.aprobada} name="Aprobadas" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="causadas" stackId="a" fill={CHART_COLORS.causada} name="Causadas" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        <ChartCard title="Evolución mensual" subtitle="Últimos 6 meses">
+          <AreaChart data={stats.monthly}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+            <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} tickFormatter={fmtCompact} />
+            <Tooltip formatter={(v) => fmt(v)} />
+            <Area type="monotone" dataKey="monto" stroke="#3b82f6" fill="#dbeafe" strokeWidth={2} />
+          </AreaChart>
         </ChartCard>
-        <ChartCard title="🏢 TOP 10 PROVEEDORES" subtitle="Por monto total facturado">
-          {stats.topProveedores.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin proveedores</div>
-          ) : (
-            <ResponsiveContainer>
-              <BarChart data={stats.topProveedores} layout="vertical" margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 10, fill: "#64748b" }} tickFormatter={fmtCompact} />
-                <YAxis dataKey="emisor" type="category" tick={{ fontSize: 10, fill: "#64748b" }} width={120} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} formatter={(value) => fmt(value)} />
-                <Bar dataKey="total" fill={CHART_COLORS.primary} radius={[0, 4, 4, 0]} name="Monto" />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+
+        <ChartCard title="Distribución por riesgo" subtitle="Análisis automático de la IA">
+          <PieChart>
+            <Pie data={stats.riskData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(d) => `${d.name}: ${d.value}`}>
+              {stats.riskData.map((d, i) => <Cell key={i} fill={d.color} />)}
+            </Pie>
+            <Tooltip />
+          </PieChart>
         </ChartCard>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14, marginBottom: 14 }}>
-        <ChartCard title="🗂 DISTRIBUCIÓN POR CATEGORÍA" subtitle="Monto facturado por tipo de gasto">
-          {stats.categorias.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin categorías</div>
-          ) : (
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie data={stats.categorias} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(entry) => `${entry.name}: ${fmtCompact(entry.value)}`} labelLine={false}>
-                  {stats.categorias.map((entry, i) => <Cell key={i} fill={CHART_COLORS.palette[i % CHART_COLORS.palette.length]} />)}
-                </Pie>
-                <Tooltip formatter={(value) => fmt(value)} contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        <ChartCard title="Top 5 emisores" subtitle="Ordenados por monto facturado">
+          <BarChart data={stats.topEmisores} layout="vertical">
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+            <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={fmtCompact} />
+            <YAxis type="category" dataKey="emisor" width={140} tick={{ fontSize: 10 }} />
+            <Tooltip formatter={(v) => fmt(v)} />
+            <Bar dataKey="monto" fill="#3b82f6" radius={[0, 6, 6, 0]} />
+          </BarChart>
         </ChartCard>
-        <ChartCard title="⚠ DISTRIBUCIÓN POR NIVEL DE RIESGO" subtitle="Cantidad de facturas según evaluación IA">
-          {stats.riesgoData.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin datos de riesgo</div>
-          ) : (
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie data={stats.riesgoData} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} label={(entry) => `${entry.name}: ${entry.count}`} labelLine={false}>
-                  {stats.riesgoData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                </Pie>
-                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
+
+        <ChartCard title="Por categoría" subtitle="Distribución del gasto">
+          <PieChart>
+            <Pie data={stats.categorias} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={(d) => d.name}>
+              {stats.categorias.map((d, i) => <Cell key={i} fill={CHART_COLORS.palette[i % CHART_COLORS.palette.length]} />)}
+            </Pie>
+            <Tooltip formatter={(v) => fmt(v)} />
+          </PieChart>
         </ChartCard>
       </div>
-      <div style={{ marginBottom: 14 }}>
-        <ChartCard title="🏛 RETENCIONES POR MES" subtitle="ReteFuente + ReteIVA + ReteICA acumulados" height={260}>
-          {stats.retencionesData.length === 0 ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#94a3b8", fontSize: 12 }}>Sin retenciones aplicadas en el período</div>
-          ) : (
-            <ResponsiveContainer>
-              <BarChart data={stats.retencionesData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#64748b" }} />
-                <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={fmtCompact} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} formatter={(value) => fmt(value)} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="retefuente" stackId="r" fill={CHART_COLORS.retefuente} name="ReteFuente" />
-                <Bar dataKey="reteiva" stackId="r" fill={CHART_COLORS.reteiva} name="ReteIVA" />
-                <Bar dataKey="reteica" stackId="r" fill={CHART_COLORS.reteica} name="ReteICA" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </ChartCard>
-      </div>
-    </React.Fragment>
+    </div>
   );
 }
-// ═══════════════════════════════════════════════════════════════
-// ASISTENTE (sin cambios)
-// ═══════════════════════════════════════════════════════════════
-function getQuickPrompts(ctx) {
-  if (!ctx.session) return ["¿Qué es este sistema y cómo funciona?", "¿Cómo cambio mi contraseña?", "¿Qué documentos procesa el asistente?"];
-  if (ctx.currentInvoice) return ["¿Qué cuenta contable debería usar para esta factura?", "Explícame las retenciones de esta factura", "¿Es deducible este gasto?"];
-  if (ctx.dashboardStats && ctx.dashboardStats.count > 0) return ["¿Cuál es mi proveedor más frecuente?", "Resúmeme el gasto del período", "¿Cuánto he retenido en total?"];
-  return ["¿Qué significa la cuenta 5110?", "¿Cómo causo una factura de servicios?", "Diferencia entre gasto y costo", "¿Qué es el PUC?"];
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ASSISTANT CHAT
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function getQuickPrompts() {
+  return [
+    "¿Cuáles son las facturas más grandes este mes?",
+    "Muéstrame las facturas con riesgo alto",
+    "¿Cuánto he pagado en retefuente este trimestre?",
+    "¿Qué facturas están pendientes de causación?",
+  ];
 }
-function AssistantMessage({ role, content }) {
-  const isUser = role === "user";
+
+function AssistantMessage({ msg }) {
+  const isUser = msg.role === "user";
   return (
     <div style={{ display: "flex", justifyContent: isUser ? "flex-end" : "flex-start", marginBottom: 10 }}>
-      <div style={{ maxWidth: "85%", padding: "10px 14px", borderRadius: 14, background: isUser ? "#0f172a" : "#f1f5f9", color: isUser ? "#fff" : "#0f172a", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-        {content}
+      <div style={{
+        maxWidth: "80%",
+        background: isUser ? "#0f172a" : "#f1f5f9",
+        color: isUser ? "#fff" : "#0f172a",
+        borderRadius: 14,
+        padding: "10px 14px",
+        fontSize: 13,
+        lineHeight: 1.5,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word"
+      }}>
+        {msg.content}
       </div>
     </div>
   );
 }
-function AssistantChat({ open, onClose, context, authFetch }) {
-  const [messages, setMessages] = useState([]);
+
+function AssistantChat({ session, authFetch, onClose }) {
+  const [messages, setMessages] = useState([
+    { role: "assistant", content: "Hola 👋 Soy tu asistente contable. Pregúntame sobre tus facturas, retenciones, riesgos o cualquier dato del dashboard." }
+  ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
+
   useEffect(() => {
-    if (!open) return;
-    if (messages.length === 0) {
-      let greeting;
-      if (!context.session) {
-        greeting = "Hola 👋 Soy el asistente contable. Antes de iniciar sesión puedo responder dudas generales sobre el sistema o sobre contabilidad.";
-      } else if (context.dashboardStats && context.dashboardStats.count > 0) {
-        greeting = `Hola 👋 Estoy viendo tus ${context.dashboardStats.count} facturas del período. Puedo ayudarte con el PUC, causación, o responder preguntas sobre tus datos — siempre con cifras verificables.`;
-      } else {
-        greeting = `Hola 👋 Soy tu asistente contable. Puedo ayudarte con el PUC, clasificación de gastos en ${context.session.software_contable || "tu software contable"}, o cualquier duda del proceso.`;
-      }
-      setMessages([{ role: "assistant", content: greeting }]);
-    }
-  }, [open]);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, sending]);
-  const send = async (text) => {
-    const userMsg = (text || input).trim();
-    if (!userMsg || sending) return;
-    const newMessages = [...messages, { role: "user", content: userMsg }];
-    setMessages(newMessages);
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  async function send(text) {
+    const content = (text || input).trim();
+    if (!content || sending) return;
+    const newMsgs = [...messages, { role: "user", content }];
+    setMessages(newMsgs);
     setInput("");
     setSending(true);
     try {
-      let data;
-      if (context.session && authFetch) {
-        const result = await authFetch(CONFIG.ASSISTANT_URL, {
-          method: "POST",
-          body: JSON.stringify({
-            nit: context.session?.nit,
-            messages: newMessages.filter(m => m.role !== "system"),
-            context: {
-              nit: context.session?.nit || null,
-              empresa: context.session?.empresa || null,
-              software_contable: context.session?.software_contable || null,
-              actividad: context.session?.actividad || null,
-              erp_fields: context.erpParams?.fields || null,
-              currentInvoice: context.currentInvoice || null,
-              currentTab: context.currentTab || null,
-              dashboardStats: context.dashboardStats || null,
-            },
-          }),
-        });
-        data = result.data;
-      } else {
-        const res = await fetch(CONFIG.ASSISTANT_URL, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: newMessages.filter(m => m.role !== "system"),
-            context: {
-              nit: null, empresa: null, software_contable: null, actividad: null,
-              erp_fields: null, currentInvoice: null, currentTab: null, dashboardStats: null,
-            },
-          }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        data = text ? JSON.parse(text) : { reply: "(Respuesta vacía del servidor)" };
-      }
-      setMessages([...newMessages, { role: "assistant", content: data.reply || "(sin respuesta)" }]);
+      const { data } = await authFetch(CONFIG.ASSISTANT_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          nit: session.nit,
+          messages: newMsgs.map(m => ({ role: m.role, content: m.content }))
+        }),
+      });
+      setMessages([...newMsgs, { role: "assistant", content: data.reply || data.message || "Sin respuesta" }]);
     } catch (e) {
-      if (e.message === 'SESSION_EXPIRED') {
-        setMessages([...newMessages, { role: "assistant", content: "⚠ Tu sesión expiró. Inicia sesión de nuevo." }]);
-      } else {
-        setMessages([...newMessages, { role: "assistant", content: "⚠ Error: " + e.message }]);
+      if (e.message !== "SESSION_EXPIRED") {
+        setMessages([...newMsgs, { role: "assistant", content: "❌ Error: " + e.message }]);
       }
-    } finally { setSending(false); }
-  };
-  if (!open) return null;
-  const quickPrompts = getQuickPrompts(context);
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
-    <div className="fade-in" style={{ position: "fixed", bottom: 90, right: 20, width: 380, maxWidth: "calc(100vw - 40px)", height: 560, maxHeight: "calc(100vh - 120px)", background: "#fff", borderRadius: 16, boxShadow: "0 25px 70px rgba(15, 23, 42, 0.35)", display: "flex", flexDirection: "column", zIndex: 99, border: "1px solid #e2e8f0", overflow: "hidden" }}>
-      <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "14px 16px", color: "#fff" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 9, letterSpacing: "0.2em", color: "#94a3b8", fontWeight: 600 }}>CONAI Smartbill</div>
-            <div style={{ fontSize: 15, fontWeight: 800, marginTop: 2 }}>💬 Ayuda contable</div>
-          </div>
-          <button onClick={onClose} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", width: 28, height: 28, borderRadius: 8, cursor: "pointer", fontSize: 14 }}>×</button>
+    <div style={{
+      position: "fixed", bottom: 90, right: 24,
+      width: 380, maxWidth: "calc(100vw - 32px)",
+      height: 540, maxHeight: "calc(100vh - 120px)",
+      background: "#fff", borderRadius: 16, border: "1px solid #e2e8f0",
+      boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+      display: "flex", flexDirection: "column", overflow: "hidden",
+      zIndex: 90
+    }}>
+      <div style={{ padding: "14px 18px", background: "linear-gradient(135deg, #0f172a, #1e293b)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: "0.1em" }}>ASISTENTE IA</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>💬 Chat contable</div>
         </div>
-        {context.currentInvoice && <div style={{ marginTop: 8, fontSize: 10, color: "#94a3b8" }}>Contexto: Factura {context.currentInvoice.numero_factura}</div>}
-        {context.dashboardStats && context.dashboardStats.count > 0 && <div style={{ marginTop: 8, fontSize: 10, color: "#a7f3d0" }}>📊 Con acceso a datos del dashboard ({context.dashboardStats.count} facturas)</div>}
+        <button onClick={onClose} style={{ background: "rgba(255,255,255,0.1)", border: "none", color: "#fff", borderRadius: 8, width: 28, height: 28, fontSize: 14, cursor: "pointer" }}>×</button>
       </div>
+
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 14, background: "#fafbfc" }}>
-        {messages.map((m, i) => <AssistantMessage key={i} role={m.role} content={m.content} />)}
-        {sending && <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 10 }}><div style={{ padding: "10px 14px", borderRadius: 14, background: "#f1f5f9", fontSize: 13, color: "#64748b" }}><span className="spin">⟳</span> Pensando...</div></div>}
+        {messages.map((m, i) => <AssistantMessage key={i} msg={m} />)}
+        {messages.length === 1 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, letterSpacing: "0.08em", marginBottom: 6 }}>SUGERENCIAS</div>
+            {getQuickPrompts().map((p, i) => (
+              <button key={i} onClick={() => send(p)} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", margin: "4px 0", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 12, cursor: "pointer", color: "#475569" }}>
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
+        {sending && (
+          <div style={{ display: "flex", justifyContent: "flex-start", marginBottom: 10 }}>
+            <div style={{ background: "#f1f5f9", borderRadius: 14, padding: "10px 14px", fontSize: 13, color: "#64748b" }}>
+              <span className="spin">⟳</span> Pensando...
+            </div>
+          </div>
+        )}
       </div>
-      {messages.length <= 2 && !sending && (
-        <div style={{ padding: "8px 14px", borderTop: "1px solid #e2e8f0", background: "#fafbfc", display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {quickPrompts.map((p, i) => (
-            <button key={i} onClick={() => send(p)} style={{ padding: "5px 10px", borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", fontSize: 10, color: "#475569", cursor: "pointer", fontFamily: "inherit" }}>{p}</button>
-          ))}
-        </div>
-      )}
-      <div style={{ padding: 12, borderTop: "1px solid #e2e8f0", background: "#fff", display: "flex", gap: 8 }}>
-        <input type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") send(); }} placeholder="Pregunta sobre contabilidad, PUC, gráficas..." disabled={sending} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }} />
-        <button onClick={() => send()} disabled={sending || !input.trim()} style={{ padding: "0 16px", borderRadius: 10, border: "none", background: sending || !input.trim() ? "#cbd5e1" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: sending || !input.trim() ? "not-allowed" : "pointer" }}>↑</button>
+
+      <div style={{ borderTop: "1px solid #e2e8f0", padding: 12, background: "#fff", display: "flex", gap: 8 }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="Pregunta algo sobre tus facturas..."
+          disabled={sending}
+          style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 13, boxSizing: "border-box" }}
+        />
+        <button onClick={() => send()} disabled={sending || !input.trim()} style={{
+          padding: "10px 16px", borderRadius: 10, border: "none",
+          background: sending || !input.trim() ? "#94a3b8" : "#0f172a", color: "#fff",
+          fontSize: 13, fontWeight: 700, cursor: sending || !input.trim() ? "not-allowed" : "pointer"
+        }}>Enviar</button>
       </div>
     </div>
   );
 }
-function AssistantFAB({ context, authFetch }) {
-  const [open, setOpen] = useState(false);
+
+function AssistantFAB({ onClick, open }) {
   return (
-    <React.Fragment>
-      <button onClick={() => setOpen(!open)} aria-label="Abrir asistente" style={{ position: "fixed", bottom: 20, right: 20, width: 56, height: 56, borderRadius: "50%", border: "none", background: open ? "#334155" : "linear-gradient(135deg, #0f172a, #1e293b)", color: "#fff", fontSize: 22, cursor: "pointer", boxShadow: "0 8px 24px rgba(15, 23, 42, 0.35)", zIndex: 98, transition: "transform 0.15s, background 0.15s" }}
-        onMouseEnter={(e) => (e.currentTarget.style.transform = "scale(1.08)")}
-        onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
-      >{open ? "×" : "💬"}</button>
-      <AssistantChat open={open} onClose={() => setOpen(false)} context={context} authFetch={authFetch} />
-    </React.Fragment>
+    <button
+      onClick={onClick}
+      title={open ? "Cerrar asistente" : "Abrir asistente IA"}
+      style={{
+        position: "fixed", bottom: 24, right: 24,
+        width: 56, height: 56, borderRadius: "50%", border: "none",
+        background: "linear-gradient(135deg, #0f172a, #1e293b)",
+        color: "#fff", fontSize: 22,
+        boxShadow: "0 10px 30px rgba(15,23,42,0.35)",
+        cursor: "pointer", zIndex: 91,
+        transition: "transform 0.2s"
+      }}
+      onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.06)"}
+      onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+    >
+      {open ? "×" : "💬"}
+    </button>
   );
 }
-// ═══════════════════════════════════════════════════════════════
-// ⭐ DASHBOARD — con botón 🛡 2FA (Fase 2) en header
-// ═══════════════════════════════════════════════════════════════
-function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePassword }) {
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// DASHBOARD (componente principal — modificado con tab 🚫 Rechazos)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings }) {
   const [facturas, setFacturas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState(null);
-  const [filter, setFilter] = useState("PENDIENTES");
-  const [search, setSearch] = useState("");
-  const [causadas, setCausadas] = useState(new Set());
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
+  const [credentials, setCredentials] = useState(null);
+  const [showApiSettings, setShowApiSettings] = useState(false);
   const [showSubUsers, setShowSubUsers] = useState(false);
-  const [show2FASettings, setShow2FASettings] = useState(false); // ⭐ Fase 2
-  const [credentials, setCredentials] = useState(session.credentials && session.credentials.has_erp_key ? session.credentials : null);
-  const [erpParams, setErpParams] = useState(null);
-  const [erpLoading, setErpLoading] = useState(false);
+  const [showAssistant, setShowAssistant] = useState(false);
   const [activeTab, setActiveTab] = useState("facturas");
-  const isMaster = session.role === "master";
-  const isSubUser = session.role === "sub_user";
+  const [expandedCufe, setExpandedCufe] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterEstado, setFilterEstado] = useState("ALL");
+
+  // ⭐ authFetch helper con manejo SESSION_EXPIRED
+  const authFetch = async (url, options = {}) => {
+    const headers = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session.token}`,
+      ...(options.headers || {}),
+    };
+    const res = await fetch(url, { ...options, headers });
+    let data;
+    try { data = await res.json(); } catch (e) { data = {}; }
+    if (res.status === 401 || data?.error === "SESSION_EXPIRED" || data?.code === "SESSION_EXPIRED") {
+      alert("Tu sesión expiró. Por favor inicia sesión nuevamente.");
+      onLogout();
+      throw new Error("SESSION_EXPIRED");
+    }
+    if (!res.ok && !data?.success && !Array.isArray(data) && !data?.facturas && !data?.users) {
+      throw new Error(data?.error || data?.message || `Error ${res.status}`);
+    }
+    return { res, data };
+  };
+
   const fetchFacturas = async () => {
     setLoading(true); setError("");
     try {
@@ -1882,420 +2644,418 @@ function Dashboard({ session, authFetch, onLogout, onContextChange, onChangePass
         method: "POST",
         body: JSON.stringify({ nit: session.nit }),
       });
-      setFacturas(Array.isArray(data) ? data : (data ? [data] : []));
+      const list = Array.isArray(data) ? data : (data.facturas || []);
+      setFacturas(list);
+      // credentials may come piggy-backed
+      if (data.credentials) setCredentials(data.credentials);
     } catch (e) {
-      if (e.message !== 'SESSION_EXPIRED') setError("No se pudieron cargar las facturas: " + e.message);
-      setFacturas([]);
+      if (e.message !== "SESSION_EXPIRED") setError("No se pudieron cargar las facturas: " + e.message);
+    } finally {
+      setLoading(false);
     }
-    finally { setLoading(false); }
   };
-  const fetchErpParams = async (creds) => {
-    if (!creds?.has_erp_key || !creds?.erpUrl) { setErpParams(null); return; }
-    setErpLoading(true);
-    try {
-      const { data } = await authFetch(CONFIG.ERP_PARAMS_URL, {
-        method: "POST",
-        body: JSON.stringify({ nit: session.nit, software: session.software_contable, empresa_nit: session.nit }),
-      });
-      setErpParams(data);
-    } catch (e) {
-      if (e.message !== 'SESSION_EXPIRED') { console.error(e); setErpParams({ fields: [] }); }
-    }
-    finally { setErpLoading(false); }
-  };
+
   useEffect(() => { fetchFacturas(); }, []);
-  useEffect(() => { if (credentials) fetchErpParams(credentials); }, [credentials]);
-  useEffect(() => { if (onContextChange) onContextChange({ erpParams }); }, [erpParams]);
-  useEffect(() => {
-    if (!onContextChange) return;
-    const current = expanded ? facturas.find(f => f.cufe === expanded) : null;
-    onContextChange({ currentInvoice: current });
-  }, [expanded, facturas]);
-  useEffect(() => { if (onContextChange) onContextChange({ currentTab: activeTab }); }, [activeTab]);
-  const handleCausar = async (inv, extras) => {
+
+  // ⭐ FASE 3 — contador de pendientes de rechazo
+  const rechazosPendientesCount = useMemo(
+    () => facturas.filter(f => f.estado === "RECHAZO_PENDIENTE").length,
+    [facturas]
+  );
+
+  const tabs = [
+    { key: "facturas", label: "📋 Facturas" },
+    { key: "rechazos", label: `🚫 Rechazos${rechazosPendientesCount > 0 ? ` (${rechazosPendientesCount})` : ""}` },
+    { key: "dashboard", label: "📊 Dashboard" },
+  ];
+
+  // Filtro de la pestaña Facturas (excluye estados de rechazo de la pestaña principal)
+  const facturasFiltradas = useMemo(() => {
+    return facturas.filter(f => {
+      if (f.estado === "RECHAZO_PENDIENTE") return false; // visible solo en pestaña Rechazos
+      if (filterEstado !== "ALL" && f.estado !== filterEstado) return false;
+      if (!search.trim()) return true;
+      const s = search.toLowerCase();
+      return (
+        (f.emisor || "").toLowerCase().includes(s) ||
+        (f.numero_factura || "").toLowerCase().includes(s) ||
+        (f.nit_emisor || "").includes(s) ||
+        (f.cufe || "").toLowerCase().includes(s)
+      );
+    });
+  }, [facturas, search, filterEstado]);
+
+  async function saveCredentials({ dianUrl, erpKey, erpUser, erpUrl }) {
     try {
-      const payload = { ...inv, ...extras, usuario: session.correo || session.email || session.nit, empresa_nit: session.nit, software_contable: session.software_contable, causado_at: new Date().toISOString() };
-      const { data } = await authFetch(CONFIG.CAUSAR_URL, {
+      const { data } = await authFetch(CONFIG.SAVE_CREDENTIALS_URL, {
         method: "POST",
-        body: JSON.stringify({ nit: session.nit, ...payload })
+        body: JSON.stringify({ nit: session.nit, dianUrl, erpKey, erpUser, erpUrl }),
       });
-      if (!data.success) throw new Error(data.error || 'Error desconocido');
-      setCausadas((p) => new Set([...p, inv.cufe]));
-      alert(`✓ Factura ${inv.numero_factura} causada en ${session.software_contable}`);
-      setExpanded(null);
+      if (data.success) {
+        setCredentials(data.credentials || { ...(credentials || {}), dianUrl, erpUser, erpUrl, has_erp_key: true, erp_key_preview: data.erp_key_preview, updatedAt: new Date().toISOString() });
+        setShowApiSettings(false);
+      } else {
+        alert("Error al guardar: " + (data.error || "desconocido"));
+      }
     } catch (e) {
-      if (e.message !== 'SESSION_EXPIRED') alert("Error al causar: " + e.message);
+      if (e.message !== "SESSION_EXPIRED") alert("Error: " + e.message);
     }
-  };
-  const isApproved = (f) => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE";
-  const dateFiltered = useMemo(() => {
-    return facturas.filter((f) => {
-      const fechaInv = dateFromInv(f);
-      if (dateFrom && fechaInv) { if (fechaInv < new Date(dateFrom)) return false; }
-      if (dateTo && fechaInv) {
-        const hasta = new Date(dateTo);
-        hasta.setHours(23, 59, 59);
-        if (fechaInv > hasta) return false;
-      }
-      if (search) {
-        const s = search.toLowerCase();
-        if (![f.numero_factura, f.emisor, f.emisor_nit, f.cufe].some((v) => (v || "").toLowerCase().includes(s))) return false;
-      }
-      return true;
-    });
-  }, [facturas, dateFrom, dateTo, search]);
-  const filtered = useMemo(() => {
-    return dateFiltered.filter((f) => {
-      const causada = causadas.has(f.cufe) || f.estado === "CAUSADA";
-      if (filter === "PENDIENTES" && (causada || !isApproved(f))) return false;
-      if (filter === "CAUSADAS" && !causada) return false;
-      return true;
-    });
-  }, [dateFiltered, filter, causadas]);
-  const stats = useMemo(() => {
-    const aprobadas = facturas.filter(isApproved);
-    const pendientes = aprobadas.filter((f) => !causadas.has(f.cufe) && f.estado !== "CAUSADA");
-    const causadasArr = facturas.filter((f) => f.estado === "CAUSADA" || causadas.has(f.cufe));
-    const totalMonto = filtered.reduce((acc, f) => acc + (Number(f.total) || 0), 0);
-    return { pendientes: pendientes.length, causadas: causadasArr.length, total: aprobadas.length, totalMonto };
-  }, [facturas, filtered, causadas]);
-  const dashboardStats = useMemo(() => computeDashboardStats(dateFiltered, causadas, dateFrom, dateTo), [dateFiltered, causadas, dateFrom, dateTo]);
-  useEffect(() => { if (onContextChange) onContextChange({ dashboardStats }); }, [dashboardStats]);
-  const quickDate = (dias) => {
-    const hasta = new Date();
-    const desde = new Date();
-    desde.setDate(desde.getDate() - dias);
-    setDateFrom(desde.toISOString().slice(0, 10));
-    setDateTo(hasta.toISOString().slice(0, 10));
-  };
-  const noFacturasForEmpresa = !loading && !error && facturas.length === 0;
-  const userBadge = isSubUser
-    ? `👤 ${session.nombre || session.email} · Usuario`
-    : `🏢 Admin · ${session.correo}`;
+  }
+
+  async function deleteCredentials() {
+    try {
+      await authFetch(CONFIG.DELETE_CREDENTIALS_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit }),
+      });
+      setCredentials(null);
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") alert("Error: " + e.message);
+    }
+  }
+
+  function handleCausada(cufe) {
+    setFacturas(prev => prev.map(f => f.cufe === cufe ? { ...f, estado: "CAUSADA" } : f));
+    setExpandedCufe(null);
+  }
+
   return (
-    <div style={{ minHeight: "100vh" }}>
-      <div style={{ background: "linear-gradient(135deg, #0f172a, #1e293b)", padding: "18px 24px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
-          <div>
-            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600, marginBottom: 4 }}>CONAI Smartbill</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#fff" }}>Causación de Facturas</div>
-            {session.empresa && session.empresa !== session.correo && (
-              <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600, marginTop: 6 }}>{session.empresa}</div>
-            )}
-            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>NIT {session.nit} · {session.software_contable} · {userBadge}</div>
-          </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            {isMaster && (
-              <button onClick={() => setShowSettings(true)} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: credentials ? "#10b981" : "transparent", color: credentials ? "#fff" : "#94a3b8", border: `1px solid ${credentials ? "#10b981" : "#334155"}` }}>
-                {credentials ? "✓ APIs conectadas" : "⚙ Conectar APIs"}
-              </button>
-            )}
-            {isMaster && (
-              <button onClick={() => setShowSubUsers(true)} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
-                👥 Usuarios
-              </button>
-            )}
-            {/* ⭐ Fase 2: botón 2FA visible para master y sub-user */}
-            <button onClick={() => setShow2FASettings(true)} title="Configuración 2FA" style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
-              🛡 2FA
-            </button>
-            <button onClick={onChangePassword} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
-              🔒 Cambiar contraseña
-            </button>
-            <button onClick={onLogout} style={{ padding: "8px 14px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#94a3b8", border: "1px solid #334155" }}>
-              Cerrar sesión
-            </button>
-          </div>
+    <div style={{ minHeight: "100vh", background: "#f0f2f5" }}>
+      {/* Header */}
+      <header style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>CONAI SMARTBILL</div>
+          <div style={{ fontSize: 16, fontWeight: 800, marginTop: 2 }}>{session.empresa || session.nombre || session.nit}</div>
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={() => setShowApiSettings(true)} title="Configurar APIs" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>⚙ APIs</button>
+          {session.role === "master" && (
+            <button onClick={() => setShowSubUsers(true)} title="Gestión de usuarios" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>👥 Usuarios</button>
+          )}
+          <button onClick={openTwoFactorSettings} title="2FA" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🛡 2FA</button>
+          <button onClick={onChangePassword} title="Cambiar contraseña" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🔑</button>
+          <button onClick={onLogout} title="Cerrar sesión" style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Salir</button>
+        </div>
+      </header>
+
+      {/* Tabs */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "0 24px", display: "flex", gap: 4 }}>
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            style={{
+              background: "transparent", border: "none",
+              padding: "12px 16px", fontSize: 13, fontWeight: 600,
+              color: activeTab === t.key ? "#0f172a" : "#64748b",
+              borderBottom: activeTab === t.key ? "2px solid #0f172a" : "2px solid transparent",
+              cursor: "pointer"
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: "16px 24px" }}>
-        {noFacturasForEmpresa ? (
-          <div style={{ marginTop: 40 }}>
-            <EmptyState icon="📄" title="No se han procesado facturas" message="Cuando lleguen facturas electrónicas aprobadas a tu correo, aparecerán aquí para causarlas en tu software contable." />
-          </div>
-        ) : (
-          <React.Fragment>
-            <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "2px solid #e2e8f0", paddingBottom: 0 }}>
-              {[
-                { key: "facturas", label: "📋 Facturas" },
-                { key: "dashboard", label: "📊 Dashboard" },
-              ].map(t => (
-                <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
-                  padding: "10px 20px", border: "none", background: "transparent",
-                  fontSize: 13, fontWeight: 700, cursor: "pointer",
-                  color: activeTab === t.key ? "#0f172a" : "#94a3b8",
-                  borderBottom: `3px solid ${activeTab === t.key ? "#0f172a" : "transparent"}`,
-                  marginBottom: -2, fontFamily: "inherit", transition: "all 0.15s",
-                }}>{t.label}</button>
-              ))}
-            </div>
-            {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#991b1b" }}>{error}</div>}
-            <div style={{ background: "#fff", borderRadius: 12, padding: 14, border: "1px solid #e2e8f0", marginBottom: 12 }}>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                {activeTab === "facturas" && [
-                  { key: "PENDIENTES", label: `Pendientes (${stats.pendientes})` },
-                  { key: "CAUSADAS", label: `Causadas (${stats.causadas})` },
-                  { key: "ALL", label: `Todas (${stats.total})` },
-                ].map((f) => (
-                  <button key={f.key} onClick={() => setFilter(f.key)} style={{
-                    padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
-                    background: filter === f.key ? "#0f172a" : "#f8fafc",
-                    color: filter === f.key ? "#fff" : "#475569",
-                    border: `1px solid ${filter === f.key ? "#0f172a" : "#e2e8f0"}`,
-                  }}>{f.label}</button>
-                ))}
-                {activeTab === "facturas" && <div style={{ width: 1, height: 24, background: "#e2e8f0", margin: "0 4px" }} />}
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>📅 Desde:</span>
-                  <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12 }} />
-                  <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>Hasta:</span>
-                  <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12 }} />
-                  {(dateFrom || dateTo) && (
-                    <button onClick={() => { setDateFrom(""); setDateTo(""); }} style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", fontSize: 11, cursor: "pointer", color: "#64748b" }}>✕</button>
-                  )}
-                </div>
-                {activeTab === "facturas" && (
-                  <input type="text" placeholder="Buscar factura, emisor, CUFE..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 240 }} />
-                )}
-                {activeTab === "dashboard" && (
-                  <input type="text" placeholder="Filtrar por proveedor..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginLeft: "auto", padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, width: 240 }} />
-                )}
-                <button onClick={fetchFacturas} disabled={loading} title="Refrescar" style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", background: "#fff", color: "#475569", border: "1px solid #e2e8f0" }}>
-                  {loading ? "⟳" : "↻"}
-                </button>
-              </div>
-              <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, alignSelf: "center" }}>ATAJOS:</span>
-                {[
-                  { d: 7, l: "Últimos 7 días" }, { d: 30, l: "Últimos 30 días" },
-                  { d: 90, l: "Últimos 3 meses" }, { d: 365, l: "Último año" },
-                ].map(q => (
-                  <button key={q.d} onClick={() => quickDate(q.d)} style={{ padding: "4px 10px", borderRadius: 12, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, cursor: "pointer", color: "#475569" }}>{q.l}</button>
-                ))}
-              </div>
-            </div>
-            {activeTab === "facturas" && (
-              <React.Fragment>
-                <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-                  <StatCard icon="⏳" label="PENDIENTES" value={stats.pendientes} color="#10b981" />
-                  <StatCard icon="✓" label="CAUSADAS" value={stats.causadas} color="#6366f1" />
-                  <StatCard icon="📄" label="TOTAL APROBADAS" value={stats.total} />
-                  <StatCard icon="💰" label="MONTO FILTRADO" value={fmt(stats.totalMonto)} />
-                </div>
-                {loading ? (
-                  <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando...</div>
-                ) : filtered.length === 0 ? (
-                  <EmptyState icon="🔍" title="Sin resultados" message="No hay facturas que coincidan con los filtros aplicados." />
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {filtered.map((inv) => {
-                      const isCausada = causadas.has(inv.cufe) || inv.estado === "CAUSADA";
-                      const isExpanded = expanded === inv.cufe;
-                      const hasRet = (inv.retefuente > 0 || inv.reteiva > 0 || inv.reteica > 0);
-                      return (
-                        <div key={inv.cufe || inv.numero_factura} style={{ background: "#fff", borderRadius: 12, border: `1px solid ${isExpanded ? "#3b82f6" : "#e2e8f0"}`, overflow: "hidden", transition: "all 0.15s" }}>
-                          <div onClick={() => setExpanded(isExpanded ? null : inv.cufe)} style={{ padding: "14px 20px", cursor: "pointer", display: "flex", alignItems: "center", gap: 14 }}>
-                            <div style={{ width: 36, height: 36, borderRadius: 8, background: isCausada ? "#dcfce7" : "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{isCausada ? "✓" : "📄"}</div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                <div style={{ fontSize: 14, fontWeight: 700 }}>{inv.numero_factura}</div>
-                                {inv.categoria && <span style={{ fontSize: 9, background: "#ede9fe", color: "#6d28d9", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>{inv.categoria}</span>}
-                              </div>
-                              <div style={{ fontSize: 12, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.emisor} · {dateStr(inv.fecha_aprobacion)}</div>
-                            </div>
-                            <div style={{ textAlign: "right", minWidth: 110 }}>
-                              <div style={{ fontSize: 14, fontWeight: 700 }}>{fmt(inv.total)}</div>
-                              {hasRet && <div style={{ fontSize: 10, color: "#f59e0b" }}>con retenciones</div>}
-                            </div>
-                            <div style={{ minWidth: 90 }}><Risk level={inv.risk_level} score={inv.risk_score} /></div>
-                            <div style={{ minWidth: 110 }}><Badge status={isCausada ? "CAUSADA" : inv.estado} /></div>
-                            <div style={{ fontSize: 16, color: "#94a3b8", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</div>
-                          </div>
-                          {isExpanded && !isCausada && <InvoiceDetail inv={inv} onCausar={handleCausar} credentials={credentials} erpParams={erpParams} erpLoading={erpLoading} authFetch={authFetch} session={session} />}
-                          {isExpanded && isCausada && <div style={{ background: "#f0fdf4", padding: 20, borderTop: "1px solid #dcfce7", textAlign: "center", color: "#166534", fontSize: 13 }}>✓ Esta factura ya fue causada</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </React.Fragment>
-            )}
-            {activeTab === "dashboard" && <DashboardView stats={dashboardStats} loading={loading} />}
-          </React.Fragment>
+
+      <main style={{ padding: 24, maxWidth: 1400, margin: "0 auto" }}>
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 14 }}>{error}</div>}
+
+        {loading && (
+          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", fontSize: 14 }}><span className="spin">⟳</span> Cargando facturas...</div>
         )}
-      </div>
-      {showSettings && isMaster && (
-        <ApiSettingsModal session={session} credentials={credentials} onClose={() => setShowSettings(false)}
-          onSave={async (creds) => {
-            try {
-              const { data } = await authFetch(CONFIG.SAVE_CREDENTIALS_URL, {
-                method: "POST",
-                body: JSON.stringify({ nit: session.nit, dianUrl: creds.dianUrl, erpUrl: creds.erpUrl, erpUser: creds.erpUser, erpKey: creds.erpKey })
-              });
-              if (!data.success) throw new Error(data.error || "Error al guardar");
-              // Después de guardar: actualizar el state SIN erpKey (server-side pattern).
-              // Marcamos has_erp_key=true porque acabamos de enviar una key válida.
-              const keyPreview = creds.erpKey ? '••••' + creds.erpKey.slice(-4) : (credentials?.erp_key_preview || '');
-              setCredentials({
-                dianUrl: creds.dianUrl,
-                erpUrl: creds.erpUrl,
-                erpUser: creds.erpUser,
-                has_erp_key: !!creds.erpKey || !!credentials?.has_erp_key,
-                erp_key_preview: keyPreview,
-                updatedAt: data.updated_at || new Date().toISOString()
-              });
-              setShowSettings(false);
-              alert("✓ Credenciales guardadas. Cargando parámetros del ERP...");
-            } catch (e) {
-              if (e.message === 'SESSION_EXPIRED') return;
-              setCredentials(creds); setShowSettings(false);
-              alert("⚠ Credenciales aplicadas localmente: " + e.message);
-            }
-          }}
-          onDelete={async () => {
-            try {
-              const { data } = await authFetch(CONFIG.DELETE_CREDENTIALS_URL, {
-                method: "POST",
-                body: JSON.stringify({ nit: session.nit })
-              });
-              if (!data.success) throw new Error(data.error || "Error al olvidar credenciales");
-              setCredentials(null); setErpParams(null); setShowSettings(false);
-              alert("✓ Credenciales olvidadas.");
-            } catch (e) {
-              if (e.message !== 'SESSION_EXPIRED') alert("⚠ Error: " + e.message);
-            }
-          }}
-        />
-      )}
-      {showSubUsers && isMaster && (
-        <SubUsersModal session={session} onClose={() => setShowSubUsers(false)} authFetch={authFetch} />
-      )}
-      {/* ⭐ Fase 2: modal de configuración 2FA (visible para master y sub-user) */}
-      {show2FASettings && (
-        <TwoFactorSettingsModal
+
+        {!loading && activeTab === "rechazos" && (
+          <RechazosBandeja session={session} authFetch={authFetch} facturas={facturas} onRefresh={fetchFacturas} />
+        )}
+
+        {!loading && activeTab === "dashboard" && (
+          <DashboardView facturas={facturas} />
+        )}
+
+        {!loading && activeTab === "facturas" && (
+          <div>
+            {/* Toolbar de búsqueda y filtros */}
+            <div style={{ background: "#fff", borderRadius: 12, padding: "12px 16px", marginBottom: 14, border: "1px solid #e2e8f0", display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="🔍 Buscar por emisor, número, NIT o CUFE..."
+                style={{ flex: 1, minWidth: 240, padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, boxSizing: "border-box" }}
+              />
+              <select value={filterEstado} onChange={(e) => setFilterEstado(e.target.value)} style={{ padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, background: "#fff", cursor: "pointer" }}>
+                <option value="ALL">Todos los estados</option>
+                <option value="APROBADA">Aprobadas</option>
+                <option value="APROBADA_AUTOMATICAMENTE">Auto-aprobadas</option>
+                <option value="CAUSADA">Causadas</option>
+                <option value="RECHAZADA_DIAN">Rechazadas DIAN</option>
+                <option value="RECHAZADA_INTERNA">Rechazadas internas</option>
+                <option value="RECHAZO_FALLIDO">Rechazo falló</option>
+              </select>
+              <button onClick={fetchFacturas} style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>↻ Refrescar</button>
+            </div>
+
+            {facturasFiltradas.length === 0 && (
+              <EmptyState icon="📭" title="No hay facturas" message={search || filterEstado !== "ALL" ? "Ninguna factura coincide con tus filtros." : "Cuando lleguen facturas a tu correo de facturación electrónica, aparecerán aquí."} />
+            )}
+
+            {facturasFiltradas.length > 0 && (
+              <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden" }}>
+                {/* Header de tabla */}
+                <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.9fr 0.9fr 0.9fr 36px", gap: 12, padding: "12px 18px", background: "#f8fafc", borderBottom: "1px solid #e2e8f0", fontSize: 10, color: "#64748b", fontWeight: 700, letterSpacing: "0.08em" }}>
+                  <div>EMISOR</div>
+                  <div>Nº FACTURA</div>
+                  <div>FECHA</div>
+                  <div>TOTAL</div>
+                  <div>ESTADO</div>
+                  <div></div>
+                </div>
+                {facturasFiltradas.map(inv => {
+                  const isExpanded = expandedCufe === inv.cufe;
+                  const isCausada = inv.estado === "CAUSADA";
+                  const isRejected = ["RECHAZADA_DIAN", "RECHAZADA_INTERNA", "RECHAZO_FALLIDO"].includes(inv.estado);
+                  const isRejectionState = isRejected || inv.estado === "RECHAZO_PENDIENTE";
+                  return (
+                    <div key={inv.cufe} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <div
+                        onClick={() => setExpandedCufe(isExpanded ? null : inv.cufe)}
+                        style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 0.9fr 0.9fr 0.9fr 36px", gap: 12, padding: "14px 18px", cursor: "pointer", alignItems: "center", background: isExpanded ? "#fafbfc" : "#fff" }}
+                      >
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{inv.emisor || "—"}</div>
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>NIT {inv.nit_emisor || "—"}</div>
+                        </div>
+                        <div style={{ fontSize: 12, color: "#475569", fontWeight: 600 }}>{inv.numero_factura || "—"}</div>
+                        <div style={{ fontSize: 12, color: "#64748b" }}>{dateStr(inv.fecha_emision)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{fmt(inv.total)}</div>
+                        <div>
+                          {isRejectionState
+                            ? <RechazoBadge estado={inv.estado} />
+                            : <Badge status={inv.estado} />}
+                        </div>
+                        <div style={{ textAlign: "right", color: "#94a3b8", fontSize: 14, transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
+                      </div>
+
+                      {/* Vista expandida */}
+                      {isExpanded && isCausada && (
+                        <div style={{ padding: "16px 24px", background: "#f0fdf4", borderTop: "1px solid #bbf7d0", color: "#166534", fontSize: 13 }}>
+                          ✓ Esta factura ya fue causada en {session.software_contable}.
+                          {inv.causado_at && <> Procesada el {dateStr(inv.causado_at)}.</>}
+                        </div>
+                      )}
+                      {isExpanded && isRejected && (
+                        <RechazoInfoView inv={inv} />
+                      )}
+                      {isExpanded && !isCausada && !isRejected && (
+                        <InvoiceDetail
+                          inv={inv}
+                          session={session}
+                          credentials={credentials}
+                          authFetch={authFetch}
+                          onCausada={handleCausada}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* Modales */}
+      {showApiSettings && (
+        <ApiSettingsModal
           session={session}
-          authFetch={authFetch}
-          onClose={() => setShow2FASettings(false)}
-          onLogoutAfterDisable={onLogout}
+          credentials={credentials}
+          onSave={saveCredentials}
+          onClose={() => setShowApiSettings(false)}
+          onDelete={deleteCredentials}
         />
       )}
+      {showSubUsers && (
+        <SubUsersModal session={session} authFetch={authFetch} onClose={() => setShowSubUsers(false)} />
+      )}
+
+      {/* Asistente flotante */}
+      <AssistantFAB onClick={() => setShowAssistant(!showAssistant)} open={showAssistant} />
+      {showAssistant && <AssistantChat session={session} authFetch={authFetch} onClose={() => setShowAssistant(false)} />}
     </div>
   );
 }
-// ═══════════════════════════════════════════════════════════════
-// APP (router) — con estados 2FA (Fase 2)
-// ═══════════════════════════════════════════════════════════════
-function getInitialView() {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("reset_token")) return "reset";
-  return "login";
-}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// APP — Router principal
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 function App() {
-  const [view, setView] = useState(getInitialView);
+  const [view, setView] = useState("login");
   const [session, setSession] = useState(null);
-  const [forcedChangeCtx, setForcedChangeCtx] = useState(null);
-  const [twoFactorCtx, setTwoFactorCtx] = useState(null); // ⭐ Fase 2: contexto para TwoFactorScreen
-  const [enrollmentCtx, setEnrollmentCtx] = useState(null); // ⭐ Fase 2: contexto para EnrollmentScreen
-  const [resetToken, setResetToken] = useState(() => {
+  const [twoFactorCtx, setTwoFactorCtx] = useState(null);     // ctx para verify_2fa
+  const [enrollmentCtx, setEnrollmentCtx] = useState(null);   // ctx para enroll_2fa
+  const [forcedChangeCtx, setForcedChangeCtx] = useState(null); // { nit, change_token }
+  const [resetToken, setResetToken] = useState("");
+  const [showTwoFactorSettings, setShowTwoFactorSettings] = useState(false);
+
+  // Lee ?token=... de la URL para reset-password al montar
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get("reset_token") || null;
-  });
-  const [assistantContext, setAssistantContext] = useState({ session: null, erpParams: null, currentInvoice: null, currentTab: null, dashboardStats: null });
-  useEffect(() => { setAssistantContext((c) => ({ ...c, session })); }, [session]);
-  const clearResetTokenFromUrl = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("reset_token");
-    window.history.replaceState({}, "", url.toString());
-  };
-  // ⭐ Helper authFetch global — añade Bearer token, maneja 401 y body vacío
-  const authFetch = async (url, options = {}) => {
-    const token = session?.access_token;
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-    };
-    const r = await fetch(url, { ...options, headers });
-    const text = await r.text();
-    // Body vacío (bloqueado por JWT/rate-limit) o 401 → logout automático
-    if (!text || r.status === 401) {
-      console.warn('authFetch: token inválido/expirado → logout automático');
-      setSession(null);
-      setView("login");
-      throw new Error('SESSION_EXPIRED');
+    const t = params.get("token");
+    if (t) {
+      setResetToken(t);
+      setView("reset");
     }
+  }, []);
+
+  function buildSession(data) {
+    return {
+      token: data.token || data.session_token || data.jwt,
+      nit: data.nit,
+      empresa: data.empresa || null,
+      nombre: data.nombre || null,
+      role: data.role || data.user_type || "master",
+      software_contable: data.software_contable || null,
+      user_id: data.user_id || null,
+      email: data.correo || data.email || null,
+    };
+  }
+
+  function handleLogin(data) {
+    setSession(buildSession(data));
+    setView("dashboard");
+  }
+  function handleLogout() {
+    setSession(null);
+    setTwoFactorCtx(null);
+    setEnrollmentCtx(null);
+    setForcedChangeCtx(null);
+    setResetToken("");
+    setView("login");
+  }
+
+  // authFetch para usar en TwoFactorSettingsModal
+  const authFetch = async (url, options = {}) => {
+    if (!session) throw new Error("No session");
+    const headers = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${session.token}`,
+      ...(options.headers || {}),
+    };
+    const res = await fetch(url, { ...options, headers });
     let data;
-    try { data = JSON.parse(text); }
-    catch (e) { throw new Error('RESPONSE_NOT_JSON'); }
-    return { ok: r.ok, status: r.status, data };
+    try { data = await res.json(); } catch (e) { data = {}; }
+    if (res.status === 401 || data?.error === "SESSION_EXPIRED" || data?.code === "SESSION_EXPIRED") {
+      alert("Tu sesión expiró. Por favor inicia sesión nuevamente.");
+      handleLogout();
+      throw new Error("SESSION_EXPIRED");
+    }
+    return { res, data };
   };
-  let screen;
-  if (view === "reset" && resetToken) {
-    screen = <ResetPasswordScreen token={resetToken} onSuccess={() => { clearResetTokenFromUrl(); setResetToken(null); setView("login"); }} />;
-  } else if (view === "forgot") {
-    screen = <ForgotPasswordScreen onBack={() => setView("login")} />;
-  } else if (view === "change_forced" && forcedChangeCtx) {
-    screen = <ChangePasswordScreen mode="forced" nit={forcedChangeCtx.nit} changeToken={forcedChangeCtx.change_token}
-      onSuccess={() => { setForcedChangeCtx(null); setView("login"); alert("✓ Contraseña actualizada. Inicia sesión con tu nueva contraseña."); }}
-      onCancel={() => {}} />;
-  } else if (view === "change_voluntary" && session) {
-    const mode = session.role === "sub_user" ? "sub_user" : "voluntary";
-    screen = <ChangePasswordScreen mode={mode} session={session} nit={session.nit}
-      onSuccess={() => { setView("dashboard"); alert("✓ Contraseña actualizada correctamente."); }}
-      onCancel={() => setView("dashboard")} />;
-  } else if (view === "verify_2fa" && twoFactorCtx) {
-    // ⭐ Fase 2: pantalla de verificación TOTP tras login con 2FA activo
-    screen = <TwoFactorScreen
-      ctx={twoFactorCtx}
-      onSuccess={(data) => {
-        // data contiene access_token y toda la info de sesión
-        setSession({
-          ...data,
-          nit: twoFactorCtx.nit,
-          role: twoFactorCtx.loginType === "master" ? "master" : "sub_user",
-        });
-        setTwoFactorCtx(null);
-        setView("dashboard");
-      }}
-      onCancel={() => { setTwoFactorCtx(null); setView("login"); }}
-    />;
-  } else if (view === "enroll_2fa" && enrollmentCtx) {
-    // ⭐ Fase 2: pantalla de configuración 2FA obligatoria tras login sin 2FA
-    screen = <EnrollmentScreen
-      ctx={enrollmentCtx}
-      onSuccess={() => {
-        // Tras guardar backup codes, volver al login para que entre con 2FA activo
-        setEnrollmentCtx(null);
-        setView("login");
-        alert("✓ 2FA configurado correctamente. Inicia sesión de nuevo e ingresa el código de 6 dígitos.");
-      }}
-      onCancel={() => { setEnrollmentCtx(null); setView("login"); }}
-    />;
-  } else if (view === "dashboard" && session) {
-    screen = <Dashboard
-      session={session}
-      authFetch={authFetch}
-      onLogout={() => { setSession(null); setView("login"); }}
-      onChangePassword={() => setView("change_voluntary")}
-      onContextChange={(partial) => setAssistantContext((c) => ({ ...c, ...partial }))}
-    />;
-  } else {
-    screen = <LoginScreen
-      onLogin={(data) => { setSession(data); setView("dashboard"); }}
+
+  // ═══ Routing ═══
+  if (view === "login") {
+    return (
+      <LoginScreen
+        onLogin={handleLogin}
+        onForgotPassword={() => setView("forgot")}
+        onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }}
+        onRequire2FA={(ctx) => { setTwoFactorCtx(ctx); setView("verify_2fa"); }}
+        onRequire2FAEnrollment={(ctx) => { setEnrollmentCtx(ctx); setView("enroll_2fa"); }}
+      />
+    );
+  }
+  if (view === "forgot") {
+    return <ForgotPasswordScreen onBack={() => setView("login")} />;
+  }
+  if (view === "reset") {
+    return (
+      <ResetPasswordScreen
+        token={resetToken}
+        onSuccess={() => {
+          setResetToken("");
+          window.history.replaceState({}, "", window.location.pathname);
+          setView("login");
+        }}
+      />
+    );
+  }
+  if (view === "change_forced") {
+    return (
+      <ChangePasswordScreen
+        mode="forced"
+        nit={forcedChangeCtx?.nit}
+        changeToken={forcedChangeCtx?.change_token}
+        onSuccess={() => { setForcedChangeCtx(null); setView("login"); }}
+        onCancel={handleLogout}
+      />
+    );
+  }
+  if (view === "change_voluntary" && session) {
+    return (
+      <ChangePasswordScreen
+        mode={session.role === "sub_user" ? "sub_user" : "voluntary"}
+        session={session}
+        onSuccess={() => setView("dashboard")}
+        onCancel={() => setView("dashboard")}
+      />
+    );
+  }
+  if (view === "enroll_2fa" && enrollmentCtx) {
+    return (
+      <EnrollmentScreen
+        ctx={enrollmentCtx}
+        onSuccess={(data) => { setEnrollmentCtx(null); handleLogin(data); }}
+        onCancel={handleLogout}
+      />
+    );
+  }
+  if (view === "verify_2fa" && twoFactorCtx) {
+    return (
+      <TwoFactorScreen
+        ctx={twoFactorCtx}
+        onSuccess={(data) => { setTwoFactorCtx(null); handleLogin(data); }}
+        onCancel={handleLogout}
+      />
+    );
+  }
+  if (view === "dashboard" && session) {
+    return (
+      <>
+        <Dashboard
+          session={session}
+          onLogout={handleLogout}
+          onChangePassword={() => setView("change_voluntary")}
+          openTwoFactorSettings={() => setShowTwoFactorSettings(true)}
+        />
+        {showTwoFactorSettings && (
+          <TwoFactorSettingsModal
+            session={session}
+            authFetch={authFetch}
+            onClose={() => setShowTwoFactorSettings(false)}
+            onLogoutAfterDisable={handleLogout}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Fallback
+  return (
+    <LoginScreen
+      onLogin={handleLogin}
       onForgotPassword={() => setView("forgot")}
       onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }}
       onRequire2FA={(ctx) => { setTwoFactorCtx(ctx); setView("verify_2fa"); }}
       onRequire2FAEnrollment={(ctx) => { setEnrollmentCtx(ctx); setView("enroll_2fa"); }}
-    />;
-  }
-  return (
-    <React.Fragment>
-      {screen}
-      <AssistantFAB context={assistantContext} authFetch={session ? authFetch : null} />
-    </React.Fragment>
+    />
   );
 }
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// MOUNT
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
 </script>
 </body>
 </html>
