@@ -163,7 +163,9 @@ function normalizeFactura(f) {
 //
 // Reglas:
 //  - "Contado"/"cash" → INTERNO (siempre)
-//  - "Crédito" explícito O fecha_vencimiento ≠ fecha_aprobacion → RADIAN
+//  - "Crédito" explícito O fecha_vencimiento ≠ fecha_emision → RADIAN
+//    (compara contra fecha_emision = fecha real de la factura UBL,
+//     NO contra fecha_aprobacion que es timestamp del sistema con hora)
 //  - Cualquier otro caso (Consignación, Transferencia, etc. sin
 //    fecha_vencimiento) → INTERNO por seguridad
 // ═══════════════════════════════════════════════════════════════
@@ -172,9 +174,11 @@ function decidirTipoRechazo(factura, aiData) {
   const medioPago = String(factura?.medio_pago || "").toLowerCase();
   const esContado = medioPago.includes("contado") || medioPago === "cash";
   const esCreditoExplicito = /credit|cr[eé]dit/i.test(medioPago);
+  // Comparar fechas en formato YYYY-MM-DD para evitar mismatches por timestamp
+  const fechaBase = factura?.fecha_emision || String(factura?.fecha_aprobacion || "").slice(0, 10);
   const tieneFechaVencimiento =
     factura?.fecha_vencimiento &&
-    factura.fecha_vencimiento !== factura.fecha_aprobacion &&
+    factura.fecha_vencimiento !== fechaBase &&
     factura.fecha_vencimiento !== "";
   const aplicaRadian = !esContado && (esCreditoExplicito || tieneFechaVencimiento);
   return aplicaRadian ? "RADIAN" : "INTERNO";
