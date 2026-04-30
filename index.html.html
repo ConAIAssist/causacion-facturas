@@ -2681,7 +2681,7 @@ function AssistantChat({ session, authFetch, onClose, facturas }) {
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
 
-  // ⭐ Construir context para el backend (sirve incluso si no hay facturas)
+  // ⭐ Calcula stats del dashboard para enviar al backend como context
   const dashboardStats = useMemo(() => {
     const F = Array.isArray(facturas) ? facturas : [];
     const aprobadasArr = F.filter(f => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE" || f.estado === "CAUSADA");
@@ -2695,7 +2695,6 @@ function AssistantChat({ session, authFetch, onClose, facturas }) {
     const totalRetenciones = totalRetefuente + totalReteiva + totalReteica;
     const totalNetoPagar = totalFacturado - totalRetenciones;
     const ticketPromedio = aprobadasArr.length > 0 ? totalFacturado / aprobadasArr.length : 0;
-    // Top proveedores
     const byEmisor = {};
     aprobadasArr.forEach(f => {
       const k = f.emisor || "—";
@@ -2704,7 +2703,6 @@ function AssistantChat({ session, authFetch, onClose, facturas }) {
       byEmisor[k].total += Number(f.total) || 0;
     });
     const topProveedores = Object.values(byEmisor).sort((a, b) => b.total - a.total).slice(0, 10);
-    // Categorías
     const byCat = {};
     aprobadasArr.forEach(f => {
       const k = f.categoria || "Sin categoría";
@@ -2713,7 +2711,6 @@ function AssistantChat({ session, authFetch, onClose, facturas }) {
       byCat[k].value += Number(f.total) || 0;
     });
     const categorias = Object.values(byCat).sort((a, b) => b.value - a.value);
-    // Riesgo
     const byRisk = { bajo: 0, medio: 0, alto: 0 };
     const byRiskMonto = { bajo: 0, medio: 0, alto: 0 };
     aprobadasArr.forEach(f => {
@@ -2877,23 +2874,16 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
       "Content-Type": "application/json",
       ...(options.headers || {}),
     };
-    // Validar que tenemos token antes de hacer la request
-    const tokenSession = session?.token;
-    if (!tokenSession) {
-      alert("Tu sesión expiró o es inválida. Inicia sesión de nuevo.");
-      onLogout();
-      throw new Error("SESSION_EXPIRED");
-    }
     // Inyectar el token en el body en lugar del header Authorization
     let body = options.body;
     if (body && typeof body === 'string') {
       try {
         const parsed = JSON.parse(body);
-        parsed.__auth_token = tokenSession;
+        parsed.__auth_token = session.token;
         body = JSON.stringify(parsed);
       } catch (e) { /* body no es JSON válido, dejarlo como está */ }
     } else if (!body) {
-      body = JSON.stringify({ __auth_token: tokenSession });
+      body = JSON.stringify({ __auth_token: session.token });
     }
     const res = await fetch(url, { ...options, headers, body });
     let data;
@@ -3184,19 +3174,13 @@ function App() {
   }, []);
 
   function buildSession(data) {
-    // Tolera múltiples nombres del token según lo que retorne el backend
-    const token = data.access_token || data.token || data.session_token || data.jwt || data.auth_token || data.bearer_token || "";
-    if (!token) {
-      console.warn("[buildSession] Sin token en data:", Object.keys(data));
-    }
     return {
-      token: token,
+      token: data.access_token || data.token || data.session_token || data.jwt,
       nit: data.nit,
       empresa: data.empresa || null,
       nombre: data.nombre || null,
       role: data.role || data.user_type || "master",
       software_contable: data.software_contable || null,
-      actividad: data.actividad || null,
       user_id: data.user_id || null,
       email: data.correo || data.email || null,
     };
@@ -3222,21 +3206,15 @@ function App() {
       "Content-Type": "application/json",
       ...(options.headers || {}),
     };
-    const tokenSession = session?.token;
-    if (!tokenSession) {
-      alert("Tu sesión expiró o es inválida. Inicia sesión de nuevo.");
-      handleLogout();
-      throw new Error("SESSION_EXPIRED");
-    }
     let body = options.body;
     if (body && typeof body === 'string') {
       try {
         const parsed = JSON.parse(body);
-        parsed.__auth_token = tokenSession;
+        parsed.__auth_token = session.token;
         body = JSON.stringify(parsed);
       } catch (e) { /* body no es JSON válido, dejarlo como está */ }
     } else if (!body) {
-      body = JSON.stringify({ __auth_token: tokenSession });
+      body = JSON.stringify({ __auth_token: session.token });
     }
     const res = await fetch(url, { ...options, headers, body });
     let data;
