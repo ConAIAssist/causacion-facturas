@@ -635,15 +635,31 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
         if (!data.success) { setError(data.error || "No se pudo enviar la solicitud"); setLoading(false); return; }
         setSubmittedPending(true);
       } else {
-        const effectiveNit = nit || session?.nit;
+        const effectiveNit = (nit || session?.nit || "").toString().replace(/\D/g, "");
+        if (!effectiveNit) {
+          setError("No se pudo determinar el NIT de la cuenta. Cierra sesión y vuelve a intentarlo.");
+          setLoading(false);
+          return;
+        }
         const payload = { nit: effectiveNit, newPassword };
         const headers = { "Content-Type": "application/json" };
         if (isForced) {
+          if (!changeToken) {
+            setError("El enlace de cambio expiró. Solicita uno nuevo.");
+            setLoading(false);
+            return;
+          }
           payload.change_token = changeToken;
         } else {
           payload.currentPassword = currentPassword;
           const masterToken = session?.token || session?.access_token;
-          if (masterToken) payload.__auth_token = masterToken;
+          if (!masterToken) {
+            setError("Tu sesión expiró. Inicia sesión de nuevo.");
+            setLoading(false);
+            setTimeout(() => onCancel(), 1500);
+            return;
+          }
+          payload.__auth_token = masterToken;
         }
         const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
           method: "POST", headers,
@@ -3088,7 +3104,7 @@ function App() {
   // Lee ?token=... de la URL para reset-password al montar
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const t = params.get("token");
+    const t = params.get("reset_token") || params.get("token");
     if (t) {
       setResetToken(t);
       setView("reset");
