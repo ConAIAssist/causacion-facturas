@@ -635,7 +635,8 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
         if (!data.success) { setError(data.error || "No se pudo enviar la solicitud"); setLoading(false); return; }
         setSubmittedPending(true);
       } else {
-        const payload = { nit, newPassword };
+        const effectiveNit = nit || session?.nit;
+        const payload = { nit: effectiveNit, newPassword };
         const headers = { "Content-Type": "application/json" };
         if (isForced) {
           payload.change_token = changeToken;
