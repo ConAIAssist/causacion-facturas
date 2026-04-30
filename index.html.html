@@ -2673,13 +2673,71 @@ function AssistantMessage({ msg }) {
   );
 }
 
-function AssistantChat({ session, authFetch, onClose }) {
+function AssistantChat({ session, authFetch, onClose, facturas }) {
   const [messages, setMessages] = useState([
     { role: "assistant", content: "Hola 👋 Soy tu asistente contable. Pregúntame sobre tus facturas, retenciones, riesgos o cualquier dato del dashboard." }
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
+
+  // ⭐ Construir context para el backend (sirve incluso si no hay facturas)
+  const dashboardStats = useMemo(() => {
+    const F = Array.isArray(facturas) ? facturas : [];
+    const aprobadasArr = F.filter(f => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE" || f.estado === "CAUSADA");
+    const pendientes = F.filter(f => f.estado === "APROBADA" || f.estado === "APROBADA_AUTOMATICAMENTE").length;
+    const causadas = F.filter(f => f.estado === "CAUSADA").length;
+    const totalFacturado = aprobadasArr.reduce((s, f) => s + (Number(f.total) || 0), 0);
+    const totalIva = aprobadasArr.reduce((s, f) => s + (Number(f.iva) || 0), 0);
+    const totalRetefuente = aprobadasArr.reduce((s, f) => s + (Number(f.retefuente) || 0), 0);
+    const totalReteiva = aprobadasArr.reduce((s, f) => s + (Number(f.reteiva) || 0), 0);
+    const totalReteica = aprobadasArr.reduce((s, f) => s + (Number(f.reteica) || 0), 0);
+    const totalRetenciones = totalRetefuente + totalReteiva + totalReteica;
+    const totalNetoPagar = totalFacturado - totalRetenciones;
+    const ticketPromedio = aprobadasArr.length > 0 ? totalFacturado / aprobadasArr.length : 0;
+    // Top proveedores
+    const byEmisor = {};
+    aprobadasArr.forEach(f => {
+      const k = f.emisor || "—";
+      if (!byEmisor[k]) byEmisor[k] = { emisor: k, emisor_nit: f.nit_emisor, count: 0, total: 0 };
+      byEmisor[k].count += 1;
+      byEmisor[k].total += Number(f.total) || 0;
+    });
+    const topProveedores = Object.values(byEmisor).sort((a, b) => b.total - a.total).slice(0, 10);
+    // Categorías
+    const byCat = {};
+    aprobadasArr.forEach(f => {
+      const k = f.categoria || "Sin categoría";
+      if (!byCat[k]) byCat[k] = { name: k, count: 0, value: 0 };
+      byCat[k].count += 1;
+      byCat[k].value += Number(f.total) || 0;
+    });
+    const categorias = Object.values(byCat).sort((a, b) => b.value - a.value);
+    // Riesgo
+    const byRisk = { bajo: 0, medio: 0, alto: 0 };
+    const byRiskMonto = { bajo: 0, medio: 0, alto: 0 };
+    aprobadasArr.forEach(f => {
+      if (byRisk[f.risk_level] !== undefined) {
+        byRisk[f.risk_level]++;
+        byRiskMonto[f.risk_level] += Number(f.total) || 0;
+      }
+    });
+    const riesgoData = [
+      { name: "Bajo", count: byRisk.bajo, monto: byRiskMonto.bajo },
+      { name: "Medio", count: byRisk.medio, monto: byRiskMonto.medio },
+      { name: "Alto", count: byRisk.alto, monto: byRiskMonto.alto },
+    ].filter(x => x.count > 0);
+    return {
+      count: aprobadasArr.length,
+      count_aprobadas: aprobadasArr.length,
+      count_pendientes: pendientes,
+      count_causadas: causadas,
+      totalFacturado, totalIva, totalNetoPagar, ticketPromedio,
+      totalRetefuente, totalReteiva, totalReteica, totalRetenciones,
+      topProveedores, categorias, riesgoData,
+      periodo: { filtro_activo: false },
+    };
+  }, [facturas]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -2697,7 +2755,14 @@ function AssistantChat({ session, authFetch, onClose }) {
         method: "POST",
         body: JSON.stringify({
           nit: session.nit,
-          messages: newMsgs.map(m => ({ role: m.role, content: m.content }))
+          messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
+          context: {
+            nit: session.nit,
+            empresa: session.empresa,
+            software_contable: session.software_contable,
+            actividad: session.actividad,
+            dashboardStats,
+          }
         }),
       });
       setMessages([...newMsgs, { role: "assistant", content: data.reply || data.message || "Sin respuesta" }]);
@@ -2812,16 +2877,23 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
       "Content-Type": "application/json",
       ...(options.headers || {}),
     };
+    // Validar que tenemos token antes de hacer la request
+    const tokenSession = session?.token;
+    if (!tokenSession) {
+      alert("Tu sesión expiró o es inválida. Inicia sesión de nuevo.");
+      onLogout();
+      throw new Error("SESSION_EXPIRED");
+    }
     // Inyectar el token en el body en lugar del header Authorization
     let body = options.body;
     if (body && typeof body === 'string') {
       try {
         const parsed = JSON.parse(body);
-        parsed.__auth_token = session.token;
+        parsed.__auth_token = tokenSession;
         body = JSON.stringify(parsed);
       } catch (e) { /* body no es JSON válido, dejarlo como está */ }
     } else if (!body) {
-      body = JSON.stringify({ __auth_token: session.token });
+      body = JSON.stringify({ __auth_token: tokenSession });
     }
     const res = await fetch(url, { ...options, headers, body });
     let data;
@@ -3084,7 +3156,7 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
 
       {/* Asistente flotante */}
       <AssistantFAB onClick={() => setShowAssistant(!showAssistant)} open={showAssistant} />
-      {showAssistant && <AssistantChat session={session} authFetch={authFetch} onClose={() => setShowAssistant(false)} />}
+      {showAssistant && <AssistantChat session={session} authFetch={authFetch} onClose={() => setShowAssistant(false)} facturas={facturas} />}
     </div>
   );
 }
