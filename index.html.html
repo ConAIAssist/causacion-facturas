@@ -635,7 +635,7 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
         if (!data.success) { setError(data.error || "No se pudo enviar la solicitud"); setLoading(false); return; }
         setSubmittedPending(true);
       } else {
-        const effectiveNit = (nit || session?.nit || "").toString().replace(/\D/g, "");
+        const effectiveNit = String(nit || session?.nit || "").replace(/\D/g, "");
         if (!effectiveNit) {
           setError("No se pudo determinar el NIT de la cuenta. Cierra sesión y vuelve a intentarlo.");
           setLoading(false);
@@ -645,7 +645,7 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
         const headers = { "Content-Type": "application/json" };
         if (isForced) {
           if (!changeToken) {
-            setError("El enlace de cambio expiró. Solicita uno nuevo.");
+            setError("El enlace de cambio expiró. Solicita uno nuevo desde el inicio de sesión.");
             setLoading(false);
             return;
           }
@@ -3101,7 +3101,7 @@ function App() {
   const [resetToken, setResetToken] = useState("");
   const [showTwoFactorSettings, setShowTwoFactorSettings] = useState(false);
 
-  // Lee ?token=... de la URL para reset-password al montar
+  // Lee ?reset_token=... (o ?token= legacy) de la URL para reset-password al montar
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("reset_token") || params.get("token");
@@ -3222,7 +3222,11 @@ function App() {
     return (
       <EnrollmentScreen
         ctx={enrollmentCtx}
-        onSuccess={(data) => { setEnrollmentCtx(null); handleLogin(data); }}
+        onSuccess={(data) => {
+          const merged = { ...data, nit: data.nit || enrollmentCtx?.nit };
+          setEnrollmentCtx(null);
+          handleLogin(merged);
+        }}
         onCancel={handleLogout}
       />
     );
@@ -3231,7 +3235,11 @@ function App() {
     return (
       <TwoFactorScreen
         ctx={twoFactorCtx}
-        onSuccess={(data) => { setTwoFactorCtx(null); handleLogin(data); }}
+        onSuccess={(data) => {
+          const merged = { ...data, nit: data.nit || twoFactorCtx?.nit };
+          setTwoFactorCtx(null);
+          handleLogin(merged);
+        }}
         onCancel={handleLogout}
       />
     );
