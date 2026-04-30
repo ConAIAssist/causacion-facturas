@@ -611,10 +611,12 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
     try {
       if (isSubUser) {
         const headers = { "Content-Type": "application/json" };
-        if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
+        const subUserPayload = { nit: session.nit, user_id: session.user_id, currentPassword, newPassword };
+        const subUserToken = session?.token || session?.access_token;
+        if (subUserToken) subUserPayload.__auth_token = subUserToken;
         const res = await fetch(CONFIG.SUB_USER_REQUEST_PW_URL, {
           method: "POST", headers,
-          body: JSON.stringify({ nit: session.nit, user_id: session.user_id, currentPassword, newPassword }),
+          body: JSON.stringify(subUserPayload),
         });
         if (res.status === 401) {
           setError("Tu sesión expiró. Inicia sesión de nuevo.");
@@ -639,7 +641,8 @@ function ChangePasswordScreen({ mode, session, nit, changeToken, onSuccess, onCa
           payload.change_token = changeToken;
         } else {
           payload.currentPassword = currentPassword;
-          if (session?.access_token) headers["Authorization"] = `Bearer ${session.access_token}`;
+          const masterToken = session?.token || session?.access_token;
+          if (masterToken) payload.__auth_token = masterToken;
         }
         const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
           method: "POST", headers,
