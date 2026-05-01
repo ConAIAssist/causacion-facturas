@@ -2980,10 +2980,14 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
     }
   }
 
-  function handleCausada(cufe) {
-    setFacturas(prev => prev.map(f => f.cufe === cufe ? { ...f, estado: "CAUSADA" } : f));
-    setExpandedCufe(null);
-  }
+  function handleCausada(cufe, data) {
+  setFacturas(prev => prev.map(f =>
+    f.cufe === cufe
+      ? { ...f, estado: "CAUSADA", registrado_en_erp: "CAUSADA", erp_id: data?.erp_id || "", causado_at: data?.causado_at || f.causado_at }
+      : f
+  ));
+  setExpandedCufe(null);
+}
 
   return (
     <div style={{ minHeight: "100vh", background: "#f0f2f5" }}>
