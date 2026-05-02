@@ -1707,7 +1707,11 @@ function ApiSettingsModal({ session, credentials, onSave, onClose, onDelete }) {
 // ═══════════════════════════════════════════════════════════════
 // COMPONENTES COMPARTIDOS
 // ═══════════════════════════════════════════════════════════════
-function Badge({ status }) {
+function Badge({ status, registradoEnErp }) {
+  // Caso especial: APROBADA pero con causación fallida → marca como "Reintentable"
+  if (status === "APROBADA" && registradoEnErp === "FALLIDA") {
+    return <span style={{ background: "#fef2f2", color: "#991b1b", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", border: "1px solid #fecaca" }}>⚠ Reintentar</span>;
+  }
   const S = {
     APROBADA: { bg: "#dcfce7", color: "#166534", label: "Aprobada" },
     APROBADA_AUTOMATICAMENTE: { bg: "#dbeafe", color: "#1e40af", label: "Auto-aprobada" },
@@ -2482,6 +2486,182 @@ function RechazosBandeja({ session, authFetch, facturas, onRefresh }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// CAUSACIÓN EXITOSA — vista cuando estado === "CAUSADA"
+// Muestra erp_id, fecha de causación, link al ERP, datos de la factura
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function CausacionExitoView({ inv, session }) {
+  const [copied, setCopied] = useState(false);
+  const erpId = inv.erp_id || "";
+  const software = session.software_contable || inv.software_contable || "tu ERP";
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(erpId);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.warn("Copy failed:", e);
+    }
+  };
+
+  return (
+    <div style={{ padding: "20px 24px", background: "#fafbfc", borderTop: "1px solid #e2e8f0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <Field label="EMISOR" value={inv.emisor} />
+        <Field label="NIT EMISOR" value={inv.nit_emisor} mono />
+        <Field label="FECHA EMISIÓN" value={dateStr(inv.fecha_emision)} />
+      </div>
+
+      <div style={{
+        background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 12,
+        padding: 18, marginBottom: 14
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#15803d", letterSpacing: "0.1em", marginBottom: 4 }}>
+              ✓ CAUSADA EN {software.toUpperCase()}
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>
+              Factura registrada exitosamente
+            </div>
+          </div>
+          <Badge status="CAUSADA" />
+        </div>
+
+        {erpId && (
+          <div style={{ background: "#fff", borderRadius: 8, padding: "12px 14px", border: "1px solid #bbf7d0", marginBottom: 12 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.05em", marginBottom: 6 }}>
+              ID EN {software.toUpperCase()}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <code style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", fontFamily: "'Courier New', monospace", wordBreak: "break-all" }}>
+                {erpId}
+              </code>
+              <button onClick={handleCopy} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", color: "#475569" }}>
+                {copied ? "✓ Copiado" : "📋 Copiar"}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: "#64748b", marginTop: 8, lineHeight: 1.4 }}>
+              Usa este ID para encontrar la factura en {software}.
+            </div>
+          </div>
+        )}
+
+        {!erpId && (
+          <div style={{ background: "#fef3c7", borderRadius: 8, padding: "10px 12px", border: "1px solid #fde68a", marginBottom: 12, fontSize: 12, color: "#92400e" }}>
+            ⚠ La causación se registró pero no se obtuvo un ID del ERP. Verifica manualmente en {software}.
+          </div>
+        )}
+
+        {inv.causado_at && (
+          <div style={{ fontSize: 11, color: "#64748b" }}>
+            <strong>Causada:</strong> {dateStr(inv.causado_at)} · {new Date(inv.causado_at).toLocaleTimeString("es-CO")}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+        <Field label="SUBTOTAL" value={fmt(inv.subtotal)} />
+        <Field label="IVA" value={fmt(inv.iva)} />
+        <Field label="TOTAL" value={fmt(inv.total)} />
+      </div>
+
+      {(inv.bodega || inv.cuenta_contable || inv.notas_causacion) && (
+        <div style={{ marginTop: 14, padding: "14px 16px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: "0.05em", marginBottom: 8 }}>
+            DATOS DE LA CAUSACIÓN
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 12, color: "#334155" }}>
+            {inv.bodega && <div><strong>Bodega:</strong> {inv.bodega}</div>}
+            {inv.cuenta_contable && <div><strong>Cuenta:</strong> {inv.cuenta_contable}</div>}
+            {inv.notas_causacion && (
+              <div style={{ gridColumn: "1 / -1" }}>
+                <strong>Notas:</strong> {inv.notas_causacion}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// CAUSACIÓN FALLIDA — vista cuando estado === "APROBADA" + registrado_en_erp === "FALLIDA"
+// Muestra error, número de intentos, botón "Reintentar"
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function CausacionFalloView({ inv, session, onReintentar }) {
+  const software = session.software_contable || inv.software_contable || "tu ERP";
+  const retryCount = Number(inv.causacion_retry_count) || 0;
+  const errorMsg = inv.causacion_error_msg || "Sin detalles del error.";
+  const lastAttempt = inv.causacion_attempted_at;
+
+  return (
+    <div style={{ padding: "20px 24px", background: "#fafbfc", borderTop: "1px solid #e2e8f0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+        <Field label="EMISOR" value={inv.emisor} />
+        <Field label="NIT EMISOR" value={inv.nit_emisor} mono />
+        <Field label="TOTAL" value={fmt(inv.total)} />
+      </div>
+
+      <div style={{
+        background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12,
+        padding: 18, marginBottom: 14
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#991b1b", letterSpacing: "0.1em", marginBottom: 4 }}>
+              ⚠ CAUSACIÓN FALLIDA
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>
+              No se pudo registrar en {software}
+              {retryCount > 1 && <span style={{ fontWeight: 600, color: "#991b1b", fontSize: 13 }}> · {retryCount} intentos</span>}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: "#fff", borderRadius: 8, padding: "10px 12px", border: "1px solid #fecaca", marginBottom: 12 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#991b1b", letterSpacing: "0.05em", marginBottom: 4 }}>
+            ERROR DEL ÚLTIMO INTENTO
+          </div>
+          <div style={{ fontSize: 12, color: "#991b1b", fontFamily: "'Courier New', monospace", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+            {errorMsg}
+          </div>
+        </div>
+
+        {lastAttempt && (
+          <div style={{ fontSize: 11, color: "#991b1b", marginBottom: 12 }}>
+            <strong>Último intento:</strong> {dateStr(lastAttempt)} · {new Date(lastAttempt).toLocaleTimeString("es-CO")}
+          </div>
+        )}
+
+        <button
+          onClick={onReintentar}
+          style={{
+            padding: "10px 18px", borderRadius: 8, border: "none",
+            background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700,
+            cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6
+          }}
+        >
+          ↻ Reintentar causación
+        </button>
+
+        {retryCount >= 3 && (
+          <div style={{ marginTop: 12, padding: "10px 12px", background: "#fff", borderRadius: 8, border: "1px solid #fde68a", fontSize: 12, color: "#92400e", lineHeight: 1.5 }}>
+            <strong>💡 Sugerencia:</strong> Después de varios intentos fallidos, vale la pena revisar la configuración:
+            <ul style={{ margin: "6px 0 0 18px", padding: 0 }}>
+              <li>Verifica las credenciales del ERP en <strong>⚙ APIs</strong></li>
+              <li>Verifica los IDs de impuestos en <strong>💸 Impuestos</strong></li>
+              <li>Confirma que el tercero existe en {software}</li>
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // INVOICE DETAIL (vista expandida normal — para facturas APROBADAS pendientes de causación)
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 function InvoiceDetail({ inv, session, credentials, authFetch, onCausada }) {
@@ -2540,6 +2720,9 @@ function InvoiceDetail({ inv, session, credentials, authFetch, onCausada }) {
       });
       if (!data.success) {
         setError(data.error || "Error al causar la factura");
+        // Notificar al parent del fallo para actualizar el state local
+        // y mostrar la vista de "Causación fallida" con el botón Reintentar.
+        if (onCausada) onCausada(inv.cufe, { ...data, _failed: true });
         return;
       }
       if (onCausada) onCausada(inv.cufe, data);
@@ -3226,13 +3409,43 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   }
 
   function handleCausada(cufe, data) {
-  setFacturas(prev => prev.map(f =>
-    f.cufe === cufe
-      ? { ...f, estado: "CAUSADA", registrado_en_erp: "CAUSADA", erp_id: data?.erp_id || "", causado_at: data?.causado_at || f.causado_at }
-      : f
-  ));
-  setExpandedCufe(null);
-}
+    // Si data._failed === true, vino desde InvoiceDetail.handleCausar después de un fallo.
+    // Actualizamos el state local con los datos del fallo (registrado_en_erp, error, retry count)
+    // para que la vista cambie a CausacionFalloView sin tener que refrescar desde el backend.
+    if (data?._failed) {
+      setFacturas(prev => prev.map(f =>
+        f.cufe === cufe
+          ? {
+              ...f,
+              registrado_en_erp: "FALLIDA",
+              causacion_error_msg: data.error || f.causacion_error_msg || "Sin detalles del error",
+              causacion_retry_count: data.retry_count != null ? Number(data.retry_count) : ((f.causacion_retry_count || 0) + 1),
+              causacion_attempted_at: new Date().toISOString(),
+              _retryRequested: false,
+            }
+          : f
+      ));
+      // NO cerramos el detalle expandido — queremos que el usuario vea el panel rojo.
+      return;
+    }
+    // Caso éxito (comportamiento original)
+    setFacturas(prev => prev.map(f =>
+      f.cufe === cufe
+        ? { ...f, estado: "CAUSADA", registrado_en_erp: "CAUSADA", erp_id: data?.erp_id || "", causado_at: data?.causado_at || f.causado_at, _retryRequested: false }
+        : f
+    ));
+    setExpandedCufe(null);
+  }
+
+  // Click en "Reintentar" desde CausacionFalloView: mostramos el formulario de causación
+  // de nuevo (limpio) sin cambiar el estado real en backend hasta que el usuario aprete Causar.
+  // Usamos un flag local _retryRequested que solo vive en memoria.
+  function handleReintentar(cufe) {
+    setFacturas(prev => prev.map(f =>
+      f.cufe === cufe ? { ...f, _retryRequested: true } : f
+    ));
+  }
+
 
   return (
     <div style={{ minHeight: "100vh", background: "#f0f2f5" }}>
@@ -3333,6 +3546,10 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
                   const isCausada = inv.estado === "CAUSADA";
                   const isRejected = ["RECHAZADA_DIAN", "RECHAZADA_INTERNA", "RECHAZO_FALLIDO"].includes(inv.estado);
                   const isRejectionState = isRejected || inv.estado === "RECHAZO_PENDIENTE";
+                  // Causación falló pero la factura sigue siendo reintentable
+                  const isCausacionFallida = !isCausada && !isRejectionState && inv.registrado_en_erp === "FALLIDA";
+                  // El usuario apretó "Reintentar" → mostramos el formulario aunque registrado_en_erp sea FALLIDA
+                  const showFormForRetry = isCausacionFallida && inv._retryRequested;
                   return (
                     <div key={inv.cufe} style={{ borderBottom: "1px solid #f1f5f9" }}>
                       <div
@@ -3349,22 +3566,28 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
                         <div>
                           {isRejectionState
                             ? <RechazoBadge estado={inv.estado} />
-                            : <Badge status={inv.estado} />}
+                            : <Badge status={inv.estado} registradoEnErp={inv.registrado_en_erp} />}
                         </div>
                         <div style={{ textAlign: "right", color: "#94a3b8", fontSize: 14, transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>›</div>
                       </div>
 
-                      {/* Vista expandida */}
+                      {/* Vista expandida — 4 casos posibles */}
                       {isExpanded && isCausada && (
-                        <div style={{ padding: "16px 24px", background: "#f0fdf4", borderTop: "1px solid #bbf7d0", color: "#166534", fontSize: 13 }}>
-                          ✓ Esta factura ya fue causada en {session.software_contable}.
-                          {inv.causado_at && <> Procesada el {dateStr(inv.causado_at)}.</>}
-                        </div>
+                        <CausacionExitoView inv={inv} session={session} />
                       )}
                       {isExpanded && isRejected && (
                         <RechazoInfoView inv={inv} />
                       )}
-                      {isExpanded && !isCausada && !isRejected && (
+                      {isExpanded && isCausacionFallida && !showFormForRetry && (
+                        <CausacionFalloView
+                          inv={inv}
+                          session={session}
+                          onReintentar={() => handleReintentar(inv.cufe)}
+                        />
+                      )}
+                      {isExpanded && (
+                        (!isCausada && !isRejected && !isCausacionFallida) || showFormForRetry
+                      ) && (
                         <InvoiceDetail
                           inv={inv}
                           session={session}
