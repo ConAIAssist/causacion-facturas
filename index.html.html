@@ -1425,6 +1425,7 @@ function TaxMappingModal({ session, authFetch, onClose }) {
   }, []);
 
   const addRow = (preset = {}) => {
+    setError(""); setSuccess("");
     setMappings(prev => [...prev, {
       tax_type: preset.tax_type || 'IVA',
       tax_rate: preset.tax_rate != null ? String(preset.tax_rate) : '19',
@@ -1436,10 +1437,12 @@ function TaxMappingModal({ session, authFetch, onClose }) {
   };
 
   const removeRow = (localId) => {
+    setError(""); setSuccess("");
     setMappings(prev => prev.filter(m => m._localId !== localId));
   };
 
   const updateRow = (localId, field, value) => {
+    setError(""); setSuccess("");
     setMappings(prev => prev.map(m => {
       if (m._localId !== localId) return m;
       const updated = { ...m, [field]: value };
@@ -1452,6 +1455,7 @@ function TaxMappingModal({ session, authFetch, onClose }) {
   };
 
   const loadColombiaTemplate = () => {
+    setError(""); setSuccess("");
     setMappings([
       { tax_type: 'IVA', tax_rate: '19', dian_code: '01', erp_tax_id: '', erp_tax_label: 'IVA 19%', _localId: 'tpl1' },
       { tax_type: 'IVA', tax_rate: '5',  dian_code: '01', erp_tax_id: '', erp_tax_label: 'IVA 5%',  _localId: 'tpl2' },
