@@ -59,6 +59,10 @@ const CONFIG = {
   // ⭐ Rechazos (Fase 3)
   RECHAZO_RECOMENDAR_URL: "https://conaiassist.app.n8n.cloud/webhook/api/rechazo-recomendar",
   CAUSAR_RECHAZO_LOTE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/causar-rechazo-lote",
+
+  // ⭐ Tax Mapping (Sprint 1)
+  TAX_MAPPING_GET_URL: "https://conaiassist.app.n8n.cloud/webhook/api/tax-mapping/get",
+  TAX_MAPPING_SAVE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/tax-mapping/save",
 };
 
 const SOFTWARE_API_URLS = {
@@ -1368,6 +1372,242 @@ function SubUsersModal({ session, onClose, authFetch }) {
             💡 Revisa tu correo para aprobar o rechazar los cambios de contraseña pendientes.
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MODAL DE CONFIGURACIÓN DE IMPUESTOS (Tax Mapping)
+// Mapea tipos de impuestos colombianos (DIAN) a IDs internos del ERP
+// ═══════════════════════════════════════════════════════════════
+function TaxMappingModal({ session, authFetch, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [softwareContable, setSoftwareContable] = useState("");
+  const [mappings, setMappings] = useState([]);
+
+  const TAX_TYPES = ['IVA', 'INC', 'Retefuente', 'Reteiva', 'Reteica', 'ICA'];
+  const DIAN_CODES = {
+    IVA: '01', INC: '04', Reteiva: '05', Retefuente: '06', Reteica: '07', ICA: '07'
+  };
+
+  // Cargar mappings existentes al abrir
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await authFetch(CONFIG.TAX_MAPPING_GET_URL, {
+          method: "POST",
+          body: JSON.stringify({}),
+        });
+        if (cancelled) return;
+        setSoftwareContable(data.software_contable || "");
+        setMappings(
+          (data.mappings || []).map(m => ({
+            tax_type: m.tax_type,
+            tax_rate: String(m.tax_rate),
+            dian_code: m.dian_code || DIAN_CODES[m.tax_type] || '',
+            erp_tax_id: m.erp_tax_id || '',
+            erp_tax_label: m.erp_tax_label || '',
+            _localId: Math.random().toString(36).slice(2),
+          }))
+        );
+      } catch (e) {
+        if (e.message !== "SESSION_EXPIRED") setError("No se pudieron cargar los mappings: " + e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const addRow = (preset = {}) => {
+    setMappings(prev => [...prev, {
+      tax_type: preset.tax_type || 'IVA',
+      tax_rate: preset.tax_rate != null ? String(preset.tax_rate) : '19',
+      dian_code: preset.dian_code || DIAN_CODES[preset.tax_type || 'IVA'] || '01',
+      erp_tax_id: '',
+      erp_tax_label: preset.erp_tax_label || '',
+      _localId: Math.random().toString(36).slice(2),
+    }]);
+  };
+
+  const removeRow = (localId) => {
+    setMappings(prev => prev.filter(m => m._localId !== localId));
+  };
+
+  const updateRow = (localId, field, value) => {
+    setMappings(prev => prev.map(m => {
+      if (m._localId !== localId) return m;
+      const updated = { ...m, [field]: value };
+      // Si cambia el tax_type, autocompletar dian_code
+      if (field === 'tax_type' && DIAN_CODES[value]) {
+        updated.dian_code = DIAN_CODES[value];
+      }
+      return updated;
+    }));
+  };
+
+  const loadColombiaTemplate = () => {
+    setMappings([
+      { tax_type: 'IVA', tax_rate: '19', dian_code: '01', erp_tax_id: '', erp_tax_label: 'IVA 19%', _localId: 'tpl1' },
+      { tax_type: 'IVA', tax_rate: '5',  dian_code: '01', erp_tax_id: '', erp_tax_label: 'IVA 5%',  _localId: 'tpl2' },
+      { tax_type: 'IVA', tax_rate: '0',  dian_code: '01', erp_tax_id: '', erp_tax_label: 'IVA 0% / Exento', _localId: 'tpl3' },
+      { tax_type: 'Retefuente', tax_rate: '2.5', dian_code: '06', erp_tax_id: '', erp_tax_label: 'RFTE 2.5%', _localId: 'tpl4' },
+      { tax_type: 'Retefuente', tax_rate: '4',   dian_code: '06', erp_tax_id: '', erp_tax_label: 'RFTE 4%',   _localId: 'tpl5' },
+      { tax_type: 'Reteiva', tax_rate: '15', dian_code: '05', erp_tax_id: '', erp_tax_label: 'ReteIVA 15%', _localId: 'tpl6' },
+      { tax_type: 'Reteica', tax_rate: '0.414', dian_code: '07', erp_tax_id: '', erp_tax_label: 'ReteICA 4.14x1000', _localId: 'tpl7' },
+    ]);
+  };
+
+  const handleSave = async () => {
+    setError(""); setSuccess(""); setSaving(true);
+    try {
+      // Validación cliente-side
+      const invalidRow = mappings.find(m => !m.erp_tax_id || !String(m.erp_tax_id).trim());
+      if (invalidRow) {
+        throw new Error(`La fila "${invalidRow.erp_tax_label || invalidRow.tax_type}" no tiene ID del ERP. Es obligatorio.`);
+      }
+      if (mappings.length === 0) {
+        throw new Error("Debes agregar al menos un mapping.");
+      }
+
+      const payload = mappings.map(m => ({
+        tax_type: m.tax_type,
+        tax_rate: Number(m.tax_rate),
+        dian_code: m.dian_code,
+        erp_tax_id: String(m.erp_tax_id).trim(),
+        erp_tax_label: m.erp_tax_label || `${m.tax_type} ${m.tax_rate}%`,
+      }));
+
+      const { data } = await authFetch(CONFIG.TAX_MAPPING_SAVE_URL, {
+        method: "POST",
+        body: JSON.stringify({ mappings: payload }),
+      });
+
+      if (data.success) {
+        setSuccess(`✓ ${data.count} mapping${data.count !== 1 ? 's' : ''} guardados.`);
+        setTimeout(() => onClose(), 1200);
+      } else {
+        throw new Error(data.error || "No se pudo guardar.");
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 12, maxWidth: 920, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)" }}>
+        {/* Header */}
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 700 }}>CONFIGURACIÓN DE IMPUESTOS</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>Mapeo IVA / Retenciones → {softwareContable || 'tu ERP'}</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 6, lineHeight: 1.5 }}>
+              Indica el ID que tu ERP usa para cada impuesto colombiano. Sin esto, las facturas con IVA no se podrán causar correctamente.
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: "#94a3b8", padding: 0, lineHeight: 1 }}>×</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+          {loading && (
+            <div style={{ textAlign: "center", color: "#64748b", padding: 40 }}>Cargando mappings...</div>
+          )}
+
+          {!loading && (
+            <>
+              {error && <div style={{ background: "#fef2f2", color: "#dc2626", padding: 12, borderRadius: 8, fontSize: 13, marginBottom: 16, border: "1px solid #fecaca" }}>{error}</div>}
+              {success && <div style={{ background: "#f0fdf4", color: "#16a34a", padding: 12, borderRadius: 8, fontSize: 13, marginBottom: 16, border: "1px solid #bbf7d0" }}>{success}</div>}
+
+              {mappings.length === 0 && (
+                <div style={{ textAlign: "center", padding: 40, color: "#64748b", border: "2px dashed #e2e8f0", borderRadius: 8 }}>
+                  <div style={{ fontSize: 36, marginBottom: 8 }}>📋</div>
+                  <div style={{ fontSize: 14, marginBottom: 16 }}>No tienes mappings configurados.</div>
+                  <button onClick={loadColombiaTemplate} style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                    + Cargar plantilla Colombia
+                  </button>
+                  <div style={{ marginTop: 12 }}>
+                    <button onClick={() => addRow()} style={{ background: "transparent", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", fontSize: 12, cursor: "pointer" }}>
+                      + Agregar fila vacía
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {mappings.length > 0 && (
+                <div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc", textAlign: "left" }}>
+                        <th style={{ padding: "10px 8px", fontWeight: 700, color: "#64748b" }}>Tipo</th>
+                        <th style={{ padding: "10px 8px", fontWeight: 700, color: "#64748b" }}>Tasa %</th>
+                        <th style={{ padding: "10px 8px", fontWeight: 700, color: "#64748b" }}>Cód. DIAN</th>
+                        <th style={{ padding: "10px 8px", fontWeight: 700, color: "#64748b" }}>ID en {softwareContable || 'ERP'} *</th>
+                        <th style={{ padding: "10px 8px", fontWeight: 700, color: "#64748b" }}>Etiqueta</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mappings.map(m => (
+                        <tr key={m._localId} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "8px" }}>
+                            <select value={m.tax_type} onChange={e => updateRow(m._localId, 'tax_type', e.target.value)} style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 12 }}>
+                              {TAX_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                          </td>
+                          <td style={{ padding: "8px", width: 90 }}>
+                            <input type="number" step="0.001" value={m.tax_rate} onChange={e => updateRow(m._localId, 'tax_rate', e.target.value)} style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 12 }} />
+                          </td>
+                          <td style={{ padding: "8px", width: 80 }}>
+                            <input type="text" value={m.dian_code} onChange={e => updateRow(m._localId, 'dian_code', e.target.value)} style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 12, background: "#f8fafc", color: "#64748b" }} />
+                          </td>
+                          <td style={{ padding: "8px", width: 130 }}>
+                            <input type="text" value={m.erp_tax_id} onChange={e => updateRow(m._localId, 'erp_tax_id', e.target.value)} placeholder="Ej: 1" style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: m.erp_tax_id ? "1px solid #cbd5e1" : "1px solid #f87171", fontSize: 12, fontWeight: 600 }} />
+                          </td>
+                          <td style={{ padding: "8px" }}>
+                            <input type="text" value={m.erp_tax_label} onChange={e => updateRow(m._localId, 'erp_tax_label', e.target.value)} placeholder="(opcional)" style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #cbd5e1", fontSize: 12 }} />
+                          </td>
+                          <td style={{ padding: "8px", width: 36 }}>
+                            <button onClick={() => removeRow(m._localId)} title="Borrar fila" style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16 }}>🗑</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+                    <button onClick={() => addRow()} style={{ background: "transparent", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      + Agregar fila
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "16px 24px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f8fafc", borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
+          <div style={{ fontSize: 11, color: "#64748b" }}>
+            {mappings.length > 0 && `${mappings.length} mapping${mappings.length !== 1 ? 's' : ''}`}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onClose} disabled={saving} style={{ background: "#fff", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 8, padding: "10px 18px", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}>
+              Cancelar
+            </button>
+            <button onClick={handleSave} disabled={saving || loading || mappings.length === 0} style={{ background: saving || mappings.length === 0 ? "#94a3b8" : "#0f172a", color: "#fff", border: "none", borderRadius: 8, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: saving || mappings.length === 0 ? "not-allowed" : "pointer" }}>
+              {saving ? "Guardando..." : "Guardar mappings"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -2861,6 +3101,7 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   const [error, setError] = useState("");
   const [credentials, setCredentials] = useState(null);
   const [showApiSettings, setShowApiSettings] = useState(false);
+  const [showTaxMapping, setShowTaxMapping] = useState(false);
   const [showSubUsers, setShowSubUsers] = useState(false);
   const [showAssistant, setShowAssistant] = useState(false);
   const [activeTab, setActiveTab] = useState("facturas");
@@ -2999,6 +3240,9 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={() => setShowApiSettings(true)} title="Configurar APIs" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>⚙ APIs</button>
+          {session.role === "master" && (
+            <button onClick={() => setShowTaxMapping(true)} title="Configurar impuestos del ERP" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>💸 Impuestos</button>
+          )}
           {session.role === "master" && (
             <button onClick={() => setShowSubUsers(true)} title="Gestión de usuarios" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>👥 Usuarios</button>
           )}
@@ -3142,6 +3386,13 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
           onSave={saveCredentials}
           onClose={() => setShowApiSettings(false)}
           onDelete={deleteCredentials}
+        />
+      )}
+      {showTaxMapping && (
+        <TaxMappingModal
+          session={session}
+          authFetch={authFetch}
+          onClose={() => setShowTaxMapping(false)}
         />
       )}
       {showSubUsers && (
