@@ -954,7 +954,7 @@ function EnrollmentScreen({ ctx, onSuccess, onCancel }) {
 // TWO-FACTOR SCREEN (Fase 2) — verificación TOTP post-login
 // ═══════════════════════════════════════════════════════════════
 function TwoFactorScreen({ ctx, onSuccess, onCancel }) {
-  const { pendingToken, expiresAt } = ctx;
+  const { pendingToken, expiresAt, nit } = ctx;
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -978,7 +978,7 @@ function TwoFactorScreen({ ctx, onSuccess, onCancel }) {
       const res = await fetch(CONFIG.TWOFA_VERIFY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pending_token: pendingToken, code }),
+        body: JSON.stringify({ pending_token: pendingToken, code, nit }),
       });
       const text = await res.text();
       if (!text) throw new Error("Respuesta vacía del servidor");
@@ -1001,7 +1001,7 @@ function TwoFactorScreen({ ctx, onSuccess, onCancel }) {
       const res = await fetch(CONFIG.TWOFA_RECOVERY_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pending_token: pendingToken, backup_code: cleaned }),
+        body: JSON.stringify({ pending_token: pendingToken, backup_code: cleaned, nit }),
       });
       const text = await res.text();
       if (!text) throw new Error("Respuesta vacía del servidor");
