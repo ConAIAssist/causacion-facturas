@@ -3766,10 +3766,10 @@ function App() {
     return (
       <EnrollmentScreen
         ctx={enrollmentCtx}
-        onSuccess={(data) => {
-          const merged = { ...data, nit: data.nit || enrollmentCtx?.nit };
+        onSuccess={() => {
           setEnrollmentCtx(null);
-          handleLogin(merged);
+          setSession(null);
+          setView("login");
         }}
         onCancel={handleLogout}
       />
