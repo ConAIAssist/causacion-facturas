@@ -520,7 +520,7 @@ function ForgotPasswordScreen({ onBack }) {
   );
 }
 
-function ResetPasswordScreen({ token, onSuccess }) {
+function ResetPasswordScreen({ token, nit, onSuccess }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -532,11 +532,12 @@ function ResetPasswordScreen({ token, onSuccess }) {
     const strengthErr = checkPasswordStrength(newPassword);
     if (strengthErr) { setError(strengthErr); return; }
     if (newPassword !== confirm) { setError("Las contraseñas no coinciden"); return; }
+    if (!nit) { setError("Enlace inválido. Solicita un nuevo correo de restablecimiento."); return; }
     setLoading(true);
     try {
-      const res = await fetch(CONFIG.RESET_PASSWORD_URL, {
+      const res = await fetch(CONFIG.CHANGE_PASSWORD_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, newPassword }),
+        body: JSON.stringify({ change_token: token, newPassword, nit }),
       });
       const text = await res.text();
       if (!text) {
@@ -3643,14 +3644,17 @@ function App() {
   const [enrollmentCtx, setEnrollmentCtx] = useState(null);   // ctx para enroll_2fa
   const [forcedChangeCtx, setForcedChangeCtx] = useState(null); // { nit, change_token }
   const [resetToken, setResetToken] = useState("");
+  const [resetNit, setResetNit] = useState("");
   const [showTwoFactorSettings, setShowTwoFactorSettings] = useState(false);
 
-  // Lee ?reset_token=... (o ?token= legacy) de la URL para reset-password al montar
+  // Lee ?reset_token=... (o ?token= legacy) y ?nit= de la URL para reset-password al montar
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("reset_token") || params.get("token");
+    const n = params.get("nit") || "";
     if (t) {
       setResetToken(t);
+      setResetNit(n);
       setView("reset");
     }
   }, []);
@@ -3678,6 +3682,7 @@ function App() {
     setEnrollmentCtx(null);
     setForcedChangeCtx(null);
     setResetToken("");
+    setResetNit("");
     setView("login");
   }
 
@@ -3733,8 +3738,10 @@ function App() {
     return (
       <ResetPasswordScreen
         token={resetToken}
+        nit={resetNit}
         onSuccess={() => {
           setResetToken("");
+          setResetNit("");
           window.history.replaceState({}, "", window.location.pathname);
           setView("login");
         }}
