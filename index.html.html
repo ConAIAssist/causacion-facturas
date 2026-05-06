@@ -63,6 +63,9 @@ const CONFIG = {
   // ⭐ Tax Mapping (Sprint 1)
   TAX_MAPPING_GET_URL: "https://conaiassist.app.n8n.cloud/webhook/api/tax-mapping/get",
   TAX_MAPPING_SAVE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/tax-mapping/save",
+
+  // ⭐ Onboarding (2.B.1.4)
+  ONBOARDING_REGISTER_URL: "https://conaiassist.app.n8n.cloud/webhook/api/onboarding/register",
 };
 
 const SOFTWARE_API_URLS = {
@@ -325,7 +328,7 @@ function AuthLayout({ title, subtitle, children }) {
 }
 
 // LoginScreen con toggle master/sub-user + soporte 2FA (Fase 2)
-function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onRequire2FA, onRequire2FAEnrollment }) {
+function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onRequire2FA, onRequire2FAEnrollment, onRegisterEmpresa }) {
   const [loginType, setLoginType] = useState("master");
   const [nit, setNit] = useState("");
   const [email, setEmail] = useState("");
@@ -454,6 +457,14 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
             Si olvidaste tu contraseña, contacta al administrador de tu empresa.
           </div>
         )}
+        {loginType === "master" && onRegisterEmpresa && (
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #e2e8f0", textAlign: "center" }}>
+            <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>¿Aún no tienes cuenta?</div>
+            <button type="button" onClick={onRegisterEmpresa} disabled={loading} style={{ width: "100%", padding: 11, borderRadius: 10, border: "1px solid #0f172a", background: "#fff", color: "#0f172a", fontSize: 13, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+              Registra tu empresa
+            </button>
+          </div>
+        )}
       </form>
     </AuthLayout>
   );
@@ -515,6 +526,173 @@ function ForgotPasswordScreen({ onBack }) {
           {loading ? <span><span className="spin">⟳</span> Enviando...</span> : "Enviar enlace"}
         </button>
         <button type="button" onClick={onBack} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
+      </form>
+    </AuthLayout>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ONBOARDING SCREEN (2.B.1.5)
+// POST /api/onboarding/register — registro self-service de empresa nueva
+// Outcomes esperados: 200 ok | 400 validation_error | 409 nit_already_exists | 429 rate_limit_exceeded
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const ONBOARDING_SOFTWARE_OPTIONS = ["Siigo", "Alegra", "Loggro", "Mantis", "Cuenti", "World Office", "Odoo"];
+
+function OnboardingScreen({ onBack }) {
+  const [nit, setNit] = useState("");
+  const [nombreEmpresa, setNombreEmpresa] = useState("");
+  const [emailMaster, setEmailMaster] = useState("");
+  const [softwareContable, setSoftwareContable] = useState("");
+  const [actividadEconomica, setActividadEconomica] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({}); // { nit: "...", email_master: "..." }
+  const [submitted, setSubmitted] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState("");
+
+  function clientValidate() {
+    const errs = {};
+    const nitClean = nit.replace(/\D/g, "");
+    if (!/^\d{8,11}$/.test(nitClean)) errs.nit = "NIT debe tener entre 8 y 11 dígitos";
+    if (nombreEmpresa.trim().length < 3 || nombreEmpresa.trim().length > 200) errs.nombre_empresa = "Nombre debe tener entre 3 y 200 caracteres";
+    const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    const emailLower = emailMaster.trim().toLowerCase();
+    if (!emailRegex.test(emailLower) || emailLower.length > 254) errs.email_master = "Formato de email inválido";
+    if (!ONBOARDING_SOFTWARE_OPTIONS.includes(softwareContable)) errs.software_contable = "Selecciona un software contable";
+    if (actividadEconomica.trim().length < 10 || actividadEconomica.trim().length > 1000) errs.actividad_economica = "Actividad económica debe tener entre 10 y 1000 caracteres";
+    return errs;
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setFieldErrors({});
+    const errs = clientValidate();
+    if (Object.keys(errs).length) { setFieldErrors(errs); return; }
+
+    setLoading(true);
+    try {
+      const res = await fetch(CONFIG.ONBOARDING_REGISTER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nit: nit.replace(/\D/g, ""),
+          nombre_empresa: nombreEmpresa.trim(),
+          email_master: emailMaster.trim().toLowerCase(),
+          software_contable: softwareContable,
+          actividad_economica: actividadEconomica.trim(),
+        }),
+      });
+      const text = await res.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch (e) { data = {}; }
+
+      if (res.ok && data.ok) {
+        setRegisteredEmail(data.master_email || emailMaster.trim().toLowerCase());
+        setSubmitted(true);
+        setLoading(false);
+        return;
+      }
+
+      // Errores específicos por outcome
+      if (res.status === 400 && Array.isArray(data.errors)) {
+        const fe = {};
+        data.errors.forEach(er => { if (er.field && er.message) fe[er.field] = er.message; });
+        setFieldErrors(fe);
+        setError("Revisa los campos marcados.");
+      } else if (res.status === 409) {
+        setError(data.message || "Esta empresa ya está registrada. Si eres el administrador, usa la opción 'Olvidé mi contraseña'.");
+      } else if (res.status === 429) {
+        setError(data.message || "Demasiados intentos de registro. Espera unos minutos antes de volver a intentar.");
+      } else {
+        setError(data.message || `Error del servidor (${res.status}). Intenta de nuevo más tarde.`);
+      }
+    } catch (err) {
+      setError("Error de conexión. Verifica tu internet e intenta de nuevo.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <AuthLayout title="¡Empresa registrada!" subtitle={`Enviamos las credenciales de acceso a ${registeredEmail}`}>
+        <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#166534", marginBottom: 16, textAlign: "center", fontWeight: 600 }}>
+          ✓ Tu empresa fue registrada correctamente
+        </div>
+        <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.6, marginBottom: 16 }}>
+          Revisa tu bandeja de entrada (y la carpeta de spam) para encontrar el correo con la <strong>contraseña temporal</strong>. Al iniciar sesión por primera vez deberás cambiarla y configurar autenticación de dos factores (2FA).
+        </div>
+        <button onClick={onBack} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+          Ir al inicio de sesión
+        </button>
+      </AuthLayout>
+    );
+  }
+
+  const inputBaseStyle = { width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit" };
+  const inputErrStyle  = { ...inputBaseStyle, border: "1px solid #fca5a5", background: "#fef9f9" };
+  const labelStyle = { display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" };
+  const fieldHintStyle = { fontSize: 10, color: "#94a3b8", marginTop: 4 };
+  const fieldErrStyle  = { fontSize: 10, color: "#ef4444", marginTop: 4, fontWeight: 600 };
+
+  const canSubmit = nit && nombreEmpresa && emailMaster && softwareContable && actividadEconomica;
+
+  return (
+    <AuthLayout title="Registra tu empresa" subtitle="Crea tu cuenta de administrador en CONAI Smartbill">
+      <form onSubmit={handleSubmit}>
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>NIT DE LA EMPRESA</label>
+          <input type="text" value={nit} onChange={(e) => setNit(e.target.value)} placeholder="Ej: 800456789" autoFocus disabled={loading}
+            style={fieldErrors.nit ? inputErrStyle : inputBaseStyle} />
+          {fieldErrors.nit
+            ? <div style={fieldErrStyle}>{fieldErrors.nit}</div>
+            : <div style={fieldHintStyle}>8 a 11 dígitos, sin dígito de verificación</div>}
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>RAZÓN SOCIAL / NOMBRE DE LA EMPRESA</label>
+          <input type="text" value={nombreEmpresa} onChange={(e) => setNombreEmpresa(e.target.value)} placeholder="Ej: Distribuidora El Progreso S.A.S." disabled={loading} maxLength={200}
+            style={fieldErrors.nombre_empresa ? inputErrStyle : inputBaseStyle} />
+          {fieldErrors.nombre_empresa && <div style={fieldErrStyle}>{fieldErrors.nombre_empresa}</div>}
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>CORREO DEL ADMINISTRADOR</label>
+          <input type="email" value={emailMaster} onChange={(e) => setEmailMaster(e.target.value)} placeholder="admin@empresa.com" disabled={loading} maxLength={254}
+            style={fieldErrors.email_master ? inputErrStyle : inputBaseStyle} />
+          {fieldErrors.email_master
+            ? <div style={fieldErrStyle}>{fieldErrors.email_master}</div>
+            : <div style={fieldHintStyle}>Recibirás aquí la contraseña temporal de acceso</div>}
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>SOFTWARE CONTABLE</label>
+          <select value={softwareContable} onChange={(e) => setSoftwareContable(e.target.value)} disabled={loading}
+            style={fieldErrors.software_contable ? inputErrStyle : inputBaseStyle}>
+            <option value="">— Selecciona —</option>
+            {ONBOARDING_SOFTWARE_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+          {fieldErrors.software_contable && <div style={fieldErrStyle}>{fieldErrors.software_contable}</div>}
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle}>ACTIVIDAD ECONÓMICA</label>
+          <textarea value={actividadEconomica} onChange={(e) => setActividadEconomica(e.target.value)} placeholder="Describe brevemente la actividad económica de tu empresa" disabled={loading} rows={3} maxLength={1000}
+            style={{ ...(fieldErrors.actividad_economica ? inputErrStyle : inputBaseStyle), resize: "vertical", minHeight: 70 }} />
+          {fieldErrors.actividad_economica
+            ? <div style={fieldErrStyle}>{fieldErrors.actividad_economica}</div>
+            : <div style={fieldHintStyle}>{actividadEconomica.trim().length}/1000 caracteres (mínimo 10)</div>}
+        </div>
+
+        {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
+
+        <button type="submit" disabled={loading || !canSubmit} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !canSubmit ? "not-allowed" : "pointer", background: loading || !canSubmit ? "#94a3b8" : "#0f172a", color: "#fff", marginBottom: 10, opacity: loading || !canSubmit ? 0.6 : 1 }}>
+          {loading ? <span><span className="spin">⟳</span> Registrando empresa...</span> : "Registrar empresa"}
+        </button>
+        <button type="button" onClick={onBack} disabled={loading} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
+          Ya tengo cuenta — Iniciar sesión
+        </button>
       </form>
     </AuthLayout>
   );
@@ -3728,8 +3906,12 @@ function App() {
         onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }}
         onRequire2FA={(ctx) => { setTwoFactorCtx(ctx); setView("verify_2fa"); }}
         onRequire2FAEnrollment={(ctx) => { setEnrollmentCtx(ctx); setView("enroll_2fa"); }}
+        onRegisterEmpresa={() => setView("onboarding")}
       />
     );
+  }
+  if (view === "onboarding") {
+    return <OnboardingScreen onBack={() => setView("login")} />;
   }
   if (view === "forgot") {
     return <ForgotPasswordScreen onBack={() => setView("login")} />;
@@ -3824,6 +4006,7 @@ function App() {
       onRequirePasswordChange={(ctx) => { setForcedChangeCtx(ctx); setView("change_forced"); }}
       onRequire2FA={(ctx) => { setTwoFactorCtx(ctx); setView("verify_2fa"); }}
       onRequire2FAEnrollment={(ctx) => { setEnrollmentCtx(ctx); setView("enroll_2fa"); }}
+      onRegisterEmpresa={() => setView("onboarding")}
     />
   );
 }
