@@ -3848,17 +3848,18 @@ function DepartamentosModal({ session, authFetch, onClose }) {
     setLoading(true);
     setError("");
     try {
-      const { data, status } = await authFetch(CONFIG.DEPARTAMENTOS_LIST_URL, {
+      const { res, data } = await authFetch(CONFIG.DEPARTAMENTOS_LIST_URL, {
         method: "POST",
         body: JSON.stringify({ nit: session.nit }),
       });
-      if (status === 200 && data?.ok) {
+      if (data?.ok) {
         setDepartamentos(data.departamentos || []);
       } else {
-        setError(data?.message || `Error ${status} al cargar departamentos.`);
+        setError(data?.message || `Error ${res?.status || ''} al cargar departamentos.`);
       }
     } catch (e) {
-      setError("Error de conexión. Revisa tu internet.");
+      if (e.message === 'SESSION_EXPIRED') return;
+      setError(e.message || "Error de conexión. Revisa tu internet.");
     } finally {
       setLoading(false);
     }
@@ -3950,19 +3951,20 @@ function DepartamentosModal({ session, authFetch, onClose }) {
         body = { nit: session.nit, id: editingId, nombre: cleanNombre, emails: cleanEmails };
       }
 
-      const { data, status } = await authFetch(url, {
+      const { res, data } = await authFetch(url, {
         method: "POST",
         body: JSON.stringify(body),
       });
 
-      if (status === 200 && data?.ok) {
+      if (data?.ok) {
         await loadList();
         cancelEdit();
       } else {
-        setError(data?.message || `Error ${status} al guardar.`);
+        setError(data?.message || `Error ${res?.status || ''} al guardar.`);
       }
     } catch (e) {
-      setError("Error de conexión.");
+      if (e.message === 'SESSION_EXPIRED') return;
+      setError(e.message || "Error de conexión.");
     } finally {
       setSaving(false);
     }
@@ -3973,17 +3975,18 @@ function DepartamentosModal({ session, authFetch, onClose }) {
     setDeletingId(depto.id);
     setError("");
     try {
-      const { data, status } = await authFetch(CONFIG.DEPARTAMENTOS_DELETE_URL, {
+      const { res, data } = await authFetch(CONFIG.DEPARTAMENTOS_DELETE_URL, {
         method: "POST",
         body: JSON.stringify({ nit: session.nit, id: depto.id }),
       });
-      if (status === 200 && data?.ok) {
+      if (data?.ok) {
         await loadList();
       } else {
-        setError(data?.message || `Error ${status} al eliminar.`);
+        setError(data?.message || `Error ${res?.status || ''} al eliminar.`);
       }
     } catch (e) {
-      setError("Error de conexión.");
+      if (e.message === 'SESSION_EXPIRED') return;
+      setError(e.message || "Error de conexión.");
     } finally {
       setDeletingId(null);
     }
