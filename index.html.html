@@ -2863,7 +2863,13 @@ function InvoiceDetail({ inv, session, credentials, authFetch, onCausada }) {
     setLoadingParams(true);
     authFetch(CONFIG.ERP_PARAMS_URL, {
       method: "POST",
-      body: JSON.stringify({ nit: session.nit, nit_emisor: inv.nit_emisor }),
+      body: JSON.stringify({
+        nit: session.nit,
+        nit_emisor: inv.nit_emisor,
+        // Drive-by #2 fix: backend lee body.software_contable para poder
+        // devolver los PARAMS_BY_SOFTWARE correctos (Siigo/Alegra/W.Office/...)
+        software_contable: session.software_contable || null,
+      }),
     })
       .then(({ data }) => {
         setErpParams({
@@ -4234,6 +4240,30 @@ function App() {
     }
   }, []);
 
+  // Drive-by #3 fix: restaurar sesión persistida en sessionStorage al montar.
+  // Si llegamos por reset-password (url tiene reset_token), NO restauramos.
+  // TTL local de 24h coincide con expires_in del JWT; backend igual rechaza si JWT venció.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reset_token") || params.get("token")) return;
+    try {
+      const raw = sessionStorage.getItem("conai_session_v1");
+      if (!raw) return;
+      const stored = JSON.parse(raw);
+      if (!stored || !stored.token) return;
+      const TTL_MS = 24 * 60 * 60 * 1000;
+      if (!stored._savedAt || (Date.now() - stored._savedAt) > TTL_MS) {
+        sessionStorage.removeItem("conai_session_v1");
+        return;
+      }
+      const { _savedAt, ...restored } = stored;
+      setSession(restored);
+      setView("dashboard");
+    } catch (e) {
+      try { sessionStorage.removeItem("conai_session_v1"); } catch (e2) {}
+    }
+  }, []);
+
   function buildSession(data) {
     return {
       token: data.access_token || data.token || data.session_token || data.jwt,
@@ -4248,7 +4278,16 @@ function App() {
   }
 
   function handleLogin(data) {
-    setSession(buildSession(data));
+    const built = buildSession(data);
+    setSession(built);
+    // Drive-by #3 fix: persistir en sessionStorage para sobrevivir hard-refresh.
+    // sessionStorage (no localStorage) → expira al cerrar tab, mejor para XSS.
+    try {
+      sessionStorage.setItem("conai_session_v1", JSON.stringify({
+        ...built,
+        _savedAt: Date.now(),
+      }));
+    } catch (e) { /* sessionStorage puede estar bloqueado (modo incógnito estricto, etc.) */ }
     setView("dashboard");
   }
   function handleLogout() {
@@ -4258,6 +4297,7 @@ function App() {
     setForcedChangeCtx(null);
     setResetToken("");
     setResetNit("");
+    try { sessionStorage.removeItem("conai_session_v1"); } catch (e) {}
     setView("login");
   }
 
