@@ -63,6 +63,12 @@ const CONFIG = {
   TAX_MAPPING_GET_URL: "https://conaiassist.app.n8n.cloud/webhook/api/tax-mapping/get",
   TAX_MAPPING_SAVE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/tax-mapping/save",
 
+  // ⭐ Departamentos (Frente 1 + 3 — multi-tenant)
+  DEPARTAMENTOS_LIST_URL:   "https://conaiassist.app.n8n.cloud/webhook/api/departamentos/list",
+  DEPARTAMENTOS_CREATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/departamentos/create",
+  DEPARTAMENTOS_UPDATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/departamentos/update",
+  DEPARTAMENTOS_DELETE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/departamentos/delete",
+
   // ⭐ Onboarding (2.B.1.4)
   ONBOARDING_REGISTER_URL: "https://conaiassist.app.n8n.cloud/webhook/api/onboarding/register",
 };
@@ -3468,6 +3474,7 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   const [showApiSettings, setShowApiSettings] = useState(false);
   const [showTaxMapping, setShowTaxMapping] = useState(false);
   const [showSubUsers, setShowSubUsers] = useState(false);
+  const [showDepartamentos, setShowDepartamentos] = useState(false);
   const [showAssistant, setShowAssistant] = useState(false);
   const [activeTab, setActiveTab] = useState("facturas");
   const [expandedCufe, setExpandedCufe] = useState(null);
@@ -3641,6 +3648,9 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
           {session.role === "master" && (
             <button onClick={() => setShowSubUsers(true)} title="Gestión de usuarios" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>👥 Usuarios</button>
           )}
+          {session.role === "master" && (
+            <button onClick={() => setShowDepartamentos(true)} title="Gestión de departamentos" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🏢 Departamentos</button>
+          )}
           <button onClick={openTwoFactorSettings} title="2FA" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🛡 2FA</button>
           <button onClick={onChangePassword} title="Cambiar contraseña" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🔑</button>
           <button onClick={onLogout} title="Cerrar sesión" style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Salir</button>
@@ -3803,6 +3813,9 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
       {showSubUsers && (
         <SubUsersModal session={session} authFetch={authFetch} onClose={() => setShowSubUsers(false)} />
       )}
+      {showDepartamentos && (
+        <DepartamentosModal session={session} authFetch={authFetch} onClose={() => setShowDepartamentos(false)} />
+      )}
 
       {/* Asistente flotante */}
       <AssistantFAB onClick={() => setShowAssistant(!showAssistant)} open={showAssistant} />
@@ -3810,6 +3823,388 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// DEPARTAMENTOS MODAL (Frente 1+3 — multi-tenant)
+// CRUD de departamentos por empresa. Master only.
+// Endpoints: list / create / update / delete (api/departamentos/*)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const EMAIL_REGEX_DEPT = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+function DepartamentosModal({ session, authFetch, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [departamentos, setDepartamentos] = useState([]);
+  const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState(null); // 'new' | uuid | null
+  const [editForm, setEditForm] = useState({ nombre: "", emails: [""] });
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  // Cargar lista al abrir
+  useEffect(() => { loadList(); }, []);
+
+  async function loadList() {
+    setLoading(true);
+    setError("");
+    try {
+      const { data, status } = await authFetch(CONFIG.DEPARTAMENTOS_LIST_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit }),
+      });
+      if (status === 200 && data?.ok) {
+        setDepartamentos(data.departamentos || []);
+      } else {
+        setError(data?.message || `Error ${status} al cargar departamentos.`);
+      }
+    } catch (e) {
+      setError("Error de conexión. Revisa tu internet.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function startEdit(depto) {
+    setEditingId(depto.id);
+    setEditForm({
+      nombre: depto.nombre,
+      emails: (depto.emails && depto.emails.length > 0) ? [...depto.emails] : [""],
+    });
+    setFieldErrors({});
+    setError("");
+  }
+
+  function startCreate() {
+    setEditingId("new");
+    setEditForm({ nombre: "", emails: [""] });
+    setFieldErrors({});
+    setError("");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditForm({ nombre: "", emails: [""] });
+    setFieldErrors({});
+  }
+
+  function addEmailField() {
+    setEditForm(f => ({ ...f, emails: [...f.emails, ""] }));
+  }
+
+  function removeEmailField(idx) {
+    setEditForm(f => ({
+      ...f,
+      emails: f.emails.length > 1 ? f.emails.filter((_, i) => i !== idx) : [""],
+    }));
+  }
+
+  function updateEmailField(idx, value) {
+    setEditForm(f => ({
+      ...f,
+      emails: f.emails.map((e, i) => i === idx ? value : e),
+    }));
+  }
+
+  function validateForm() {
+    const errs = {};
+    const nombreTrim = editForm.nombre.trim();
+    if (nombreTrim.length < 1 || nombreTrim.length > 120) {
+      errs.nombre = "El nombre debe tener entre 1 y 120 caracteres";
+    }
+    const validEmails = editForm.emails
+      .map(e => e.trim())
+      .filter(e => e.length > 0);
+    if (validEmails.length === 0) {
+      errs.emails = "Debe haber al menos un correo válido";
+    } else {
+      const invalidEmails = validEmails.filter(e => !EMAIL_REGEX_DEPT.test(e));
+      if (invalidEmails.length > 0) {
+        errs.emails = `Correos inválidos: ${invalidEmails.join(", ")}`;
+      }
+    }
+    return errs;
+  }
+
+  async function saveEdit() {
+    const errs = validateForm();
+    if (Object.keys(errs).length > 0) {
+      setFieldErrors(errs);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setFieldErrors({});
+
+    const cleanEmails = editForm.emails
+      .map(e => e.trim())
+      .filter(e => e.length > 0);
+    const cleanNombre = editForm.nombre.trim();
+
+    try {
+      let url, body;
+      if (editingId === "new") {
+        url = CONFIG.DEPARTAMENTOS_CREATE_URL;
+        body = { nit: session.nit, nombre: cleanNombre, emails: cleanEmails };
+      } else {
+        url = CONFIG.DEPARTAMENTOS_UPDATE_URL;
+        body = { nit: session.nit, id: editingId, nombre: cleanNombre, emails: cleanEmails };
+      }
+
+      const { data, status } = await authFetch(url, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+
+      if (status === 200 && data?.ok) {
+        await loadList();
+        cancelEdit();
+      } else {
+        setError(data?.message || `Error ${status} al guardar.`);
+      }
+    } catch (e) {
+      setError("Error de conexión.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteDepto(depto) {
+    if (!confirm(`¿Eliminar el departamento "${depto.nombre}"?\n\nEsta acción no se puede deshacer.`)) return;
+    setDeletingId(depto.id);
+    setError("");
+    try {
+      const { data, status } = await authFetch(CONFIG.DEPARTAMENTOS_DELETE_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, id: depto.id }),
+      });
+      if (status === 200 && data?.ok) {
+        await loadList();
+      } else {
+        setError(data?.message || `Error ${status} al eliminar.`);
+      }
+    } catch (e) {
+      setError("Error de conexión.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  // ─── UI ───
+  const inputBase = {
+    width: "100%",
+    padding: "9px 12px",
+    borderRadius: 8,
+    border: "1px solid #e2e8f0",
+    fontSize: 13,
+    fontFamily: "inherit",
+    boxSizing: "border-box",
+  };
+  const inputErrorStyle = { ...inputBase, borderColor: "#ef4444" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 640, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>GESTIÓN DE DEPARTAMENTOS</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>🏢 Departamentos</div>
+            {!loading && (
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                {departamentos.length} departamento{departamentos.length !== 1 ? "s" : ""} configurado{departamentos.length !== 1 ? "s" : ""}
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
+        </div>
+
+        {/* Info box */}
+        <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12, color: "#0369a1", lineHeight: 1.5 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>ⓘ ¿Qué son los departamentos?</div>
+          <div>Cuando llega una factura, la IA elige el departamento más apropiado según el contenido y envía la aprobación a sus correos. Configura los departamentos de tu empresa y a quién notificar para cada uno.</div>
+        </div>
+
+        {/* Error global */}
+        {error && (
+          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 12, color: "#b91c1c" }}>
+            {error}
+          </div>
+        )}
+
+        {/* Loading state */}
+        {loading && (
+          <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 13 }}>
+            Cargando departamentos...
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!loading && departamentos.length === 0 && editingId !== "new" && (
+          <div style={{ textAlign: "center", padding: 32, background: "#f8fafc", borderRadius: 10, marginBottom: 16 }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🏢</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Aún no tienes departamentos</div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>Crea el primero para que la IA pueda enrutar facturas correctamente.</div>
+          </div>
+        )}
+
+        {/* Lista de departamentos */}
+        {!loading && departamentos.map(depto => (
+          <div key={depto.id}>
+            {editingId === depto.id ? (
+              <DeptoEditForm
+                form={editForm}
+                fieldErrors={fieldErrors}
+                saving={saving}
+                onChange={setEditForm}
+                addEmail={addEmailField}
+                removeEmail={removeEmailField}
+                updateEmail={updateEmailField}
+                onSave={saveEdit}
+                onCancel={cancelEdit}
+                inputBase={inputBase}
+                inputErrorStyle={inputErrorStyle}
+              />
+            ) : (
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14, marginBottom: 10, opacity: editingId !== null ? 0.5 : 1 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>
+                      {depto.nombre}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {(depto.emails || []).map((email, i) => (
+                        <div key={i} style={{ fontSize: 12, color: "#475569", fontFamily: "monospace" }}>
+                          📧 {email}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      onClick={() => startEdit(depto)}
+                      disabled={editingId !== null}
+                      title="Editar"
+                      style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, width: 30, height: 30, fontSize: 13, cursor: editingId !== null ? "not-allowed" : "pointer" }}
+                    >✏</button>
+                    <button
+                      onClick={() => deleteDepto(depto)}
+                      disabled={editingId !== null || deletingId === depto.id}
+                      title="Eliminar"
+                      style={{ background: "#fff", border: "1px solid #fecaca", borderRadius: 6, width: 30, height: 30, fontSize: 13, cursor: (editingId !== null || deletingId === depto.id) ? "not-allowed" : "pointer", color: "#b91c1c" }}
+                    >{deletingId === depto.id ? "..." : "🗑"}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Form de creación nuevo */}
+        {editingId === "new" && (
+          <DeptoEditForm
+            form={editForm}
+            fieldErrors={fieldErrors}
+            saving={saving}
+            isNew={true}
+            onChange={setEditForm}
+            addEmail={addEmailField}
+            removeEmail={removeEmailField}
+            updateEmail={updateEmailField}
+            onSave={saveEdit}
+            onCancel={cancelEdit}
+            inputBase={inputBase}
+            inputErrorStyle={inputErrorStyle}
+          />
+        )}
+
+        {/* Botón añadir (solo si no hay edición activa) */}
+        {!loading && editingId === null && (
+          <button
+            onClick={startCreate}
+            style={{ width: "100%", padding: "12px", borderRadius: 10, border: "1px dashed #94a3b8", background: "#f8fafc", fontSize: 13, fontWeight: 600, color: "#475569", cursor: "pointer", marginTop: 8 }}
+          >+ Añadir departamento</button>
+        )}
+
+        {/* Footer */}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24, paddingTop: 16, borderTop: "1px solid #f1f5f9" }}>
+          <button onClick={onClose} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Sub-componente: Form inline para edit/create de un depto
+function DeptoEditForm({ form, fieldErrors, saving, isNew, onChange, addEmail, removeEmail, updateEmail, onSave, onCancel, inputBase, inputErrorStyle }) {
+  return (
+    <div style={{ background: "#fefce8", border: "1px solid #fde68a", borderRadius: 10, padding: 14, marginBottom: 10 }}>
+      <div style={{ fontSize: 10, letterSpacing: "0.15em", color: "#a16207", fontWeight: 700, marginBottom: 10 }}>
+        {isNew ? "+ NUEVO DEPARTAMENTO" : "✏ EDITANDO DEPARTAMENTO"}
+      </div>
+
+      {/* Nombre */}
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 4 }}>Nombre</label>
+        <input
+          type="text"
+          value={form.nombre}
+          onChange={e => onChange({ ...form, nombre: e.target.value })}
+          placeholder="Ej: Compras, Contabilidad, RRHH..."
+          maxLength={120}
+          style={fieldErrors.nombre ? inputErrorStyle : inputBase}
+        />
+        {fieldErrors.nombre && <div style={{ fontSize: 11, color: "#ef4444", marginTop: 4 }}>{fieldErrors.nombre}</div>}
+      </div>
+
+      {/* Emails */}
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: "#475569", display: "block", marginBottom: 4 }}>
+          Correos de aprobación
+          <span style={{ fontWeight: 400, color: "#94a3b8", marginLeft: 6 }}>({form.emails.filter(e => e.trim()).length} válido{form.emails.filter(e => e.trim()).length !== 1 ? "s" : ""})</span>
+        </label>
+        {form.emails.map((email, i) => (
+          <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+            <input
+              type="email"
+              value={email}
+              onChange={e => updateEmail(i, e.target.value)}
+              placeholder="correo@empresa.com"
+              style={{ ...inputBase, flex: 1 }}
+            />
+            {form.emails.length > 1 && (
+              <button
+                onClick={() => removeEmail(i)}
+                title="Quitar correo"
+                style={{ background: "#fff", border: "1px solid #fecaca", borderRadius: 6, width: 32, fontSize: 13, cursor: "pointer", color: "#b91c1c" }}
+              >−</button>
+            )}
+          </div>
+        ))}
+        <button
+          onClick={addEmail}
+          style={{ background: "transparent", border: "1px dashed #cbd5e1", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 600, color: "#64748b", cursor: "pointer", marginTop: 4 }}
+        >+ Añadir correo</button>
+        {fieldErrors.emails && <div style={{ fontSize: 11, color: "#ef4444", marginTop: 4 }}>{fieldErrors.emails}</div>}
+      </div>
+
+      {/* Acciones */}
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer", color: "#475569" }}
+        >Cancelar</button>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: "#0f172a", color: "#fff", fontSize: 12, fontWeight: 700, cursor: saving ? "not-allowed" : "pointer" }}
+        >{saving ? "Guardando..." : (isNew ? "Crear" : "Guardar")}</button>
+      </div>
+    </div>
+  );
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // APP — Router principal
