@@ -4407,8 +4407,15 @@ function App() {
         ctx={twoFactorCtx}
         onSuccess={(data) => {
           const merged = { ...data, nit: data.nit || twoFactorCtx?.nit };
+          if (merged.requires_password_change && merged.change_token) {
+            setTwoFactorCtx(null);
+            setForcedChangeCtx({ nit: merged.nit, change_token: merged.change_token });
+            setView("change_forced");
+            return;
+          }
           setTwoFactorCtx(null);
           handleLogin(merged);
+
         }}
         onCancel={handleLogout}
       />
