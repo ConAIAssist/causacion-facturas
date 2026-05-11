@@ -1590,7 +1590,7 @@ function ChangeEmailModal({ session, authFetch, onSuccess, onClose }) {
           <button type="button" onClick={onClose} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
             Cancelar
           </button>
-          <button type="submit" disabled={loading || code.length !== 8 || expired} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: loading || code.length !== 6 || expired ? "#94a3b8" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: loading || code.length !== 6 || expired ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+          <button type="submit" disabled={loading || code.length !== 8 || expired} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: loading || code.length !== 8 || expired ? "#94a3b8" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: loading || code.length !== 6 || expired ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
             {loading ? <span><span className="spin">⟳</span> Confirmando...</span> : "Confirmar cambio"}
           </button>
         </div>
