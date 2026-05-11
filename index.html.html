@@ -1378,6 +1378,236 @@ function TwoFactorSettingsModal({ session, authFetch, onClose, onLogoutAfterDisa
     </div>
   );
 }
+ // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE C — DELETE EMPRESA MODAL
+// Modal destructivo de 3 pasos para que el master+owner solicite eliminación
+// de la empresa. La eliminación NO es inmediata: hay 30 días de gracia (banner amarillo).
+// 
+// PASO A (warning + confirmación textual):
+//   - Lista de consecuencias
+//   - Campo "escribí ELIMINAR <NIT>" — botón habilitado solo si matchea exacto
+// 
+// PASO B (verificación 2FA):
+//   - Código 6 dígitos del Authenticator
+//   - POST /api/empresa/request-deletion con { nit, totp_code }
+//   - Backend valida + UPDATE empresas SET deleted_at = NOW()
+// 
+// PASO C (success):
+//   - "✓ Marcada para eliminación"
+//   - "Tenés 30 días para cancelar desde el banner amarillo"
+// 
+// Props:
+//   - session: { nit, ... }
+//   - authFetch: helper heredado
+//   - onSuccess: callback con ISO timestamp (para que el banner aparezca runtime)
+//   - onClose: callback de cierre
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function DeleteEmpresaModal({ session, authFetch, onSuccess, onClose }) {
+  const [step, setStep] = useState("warning"); // warning | verify_2fa | success
+  const [confirmText, setConfirmText] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [deletedAtIso, setDeletedAtIso] = useState(null);
+  const expectedConfirm = `ELIMINAR ${session.nit}`;
+  const matchesConfirm = confirmText.trim().toUpperCase() === expectedConfirm;
+  function handleStartVerify() {
+    if (!matchesConfirm) return;
+    setError("");
+    setStep("verify_2fa");
+  }
+  async function handleConfirmDelete(e) {
+    e.preventDefault();
+    setError("");
+    if (!/^\d{6}$/.test(totpCode)) {
+      setError("Ingresa el código de 6 dígitos de tu app de autenticación");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data } = await authFetch(CONFIG.EMPRESA_REQUEST_DELETION_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          nit: session.nit,
+          totp_code: totpCode.trim(),
+        }),
+      });
+      if (data?.ok) {
+        const iso = data.deleted_at || new Date().toISOString();
+        setDeletedAtIso(iso);
+        setStep("success");
+        if (onSuccess) onSuccess(iso);
+      } else {
+        setError(data?.message || "No se pudo procesar la eliminación. Verificá el código y volvé a intentar.");
+        setTotpCode("");
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") {
+        setError(e.message || "Error de conexión.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+  // ─── PASO A: WARNING + CONFIRMACIÓN TEXTUAL ───
+  const renderWarning = () => (
+    <div>
+      <div style={{ background: "#fef2f2", border: "2px solid #fecaca", borderRadius: 12, padding: 18, marginBottom: 18 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#991b1b", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 22 }}>⚠</span>
+          Acción permanente
+        </div>
+        <div style={{ fontSize: 12, color: "#991b1b", lineHeight: 1.7 }}>
+          Si confirmás la eliminación:
+          <ul style={{ margin: "8px 0 0 22px", padding: 0 }}>
+            <li><strong>30 días de gracia</strong> para revertir desde el banner amarillo del dashboard</li>
+            <li>Después de 30 días, <strong>todos los datos serán eliminados permanentemente</strong></li>
+            <li>Sub-usuarios y otros masters perderán acceso al confirmar el cambio</li>
+            <li>Facturas pendientes no se podrán causar</li>
+            <li>Esta acción <strong>NO se puede deshacer</strong> después del período de gracia</li>
+          </ul>
+        </div>
+      </div>
+      <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 14, border: "1px solid #e2e8f0" }}>
+        <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 8, letterSpacing: "0.05em" }}>
+          PARA CONFIRMAR, ESCRIBÍ EXACTAMENTE:
+        </div>
+        <div style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 700, color: "#0f172a", padding: "8px 12px", background: "#fff", borderRadius: 6, border: "1px solid #e2e8f0", marginBottom: 10, letterSpacing: "0.05em" }}>
+          {expectedConfirm}
+        </div>
+        <input
+          type="text"
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          placeholder={`Ej: ${expectedConfirm}`}
+          autoFocus
+          style={{
+            width: "100%", padding: "10px 14px", borderRadius: 10,
+            border: `1px solid ${matchesConfirm ? "#86efac" : "#e2e8f0"}`,
+            background: matchesConfirm ? "#f0fdf4" : "#fff",
+            fontSize: 13, fontFamily: "monospace", letterSpacing: "0.05em",
+            boxSizing: "border-box",
+          }}
+        />
+        {confirmText && !matchesConfirm && (
+          <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+            Debe coincidir exactamente con el texto de arriba (mayúsculas)
+          </div>
+        )}
+        {matchesConfirm && (
+          <div style={{ fontSize: 10, color: "#16a34a", marginTop: 4, fontWeight: 600 }}>
+            ✓ Texto correcto
+          </div>
+        )}
+      </div>
+      {error && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <button type="button" onClick={onClose} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569", fontFamily: "inherit" }}>
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={handleStartVerify}
+          disabled={!matchesConfirm}
+          style={{
+            padding: "10px 24px", borderRadius: 8, border: "none",
+            background: !matchesConfirm ? "#fca5a5" : "#dc2626",
+            color: "#fff", fontSize: 13, fontWeight: 700,
+            cursor: !matchesConfirm ? "not-allowed" : "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          Continuar →
+        </button>
+      </div>
+    </div>
+  );
+  // ─── PASO B: VERIFICACIÓN 2FA ───
+  const renderVerify2FA = () => (
+    <form onSubmit={handleConfirmDelete}>
+      <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12, color: "#92400e", lineHeight: 1.5 }}>
+        🔐 <strong>Verificación de seguridad</strong>. Por la criticidad de esta acción, necesitamos validar tu identidad con 2FA. Ingresá el código de 6 dígitos de tu app.
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>
+          CÓDIGO DE 6 DÍGITOS
+        </label>
+        <input
+          type="text"
+          value={totpCode}
+          onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          placeholder="123456"
+          autoFocus
+          disabled={loading}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 24, fontFamily: "monospace", textAlign: "center", letterSpacing: "0.4em", boxSizing: "border-box" }}
+        />
+      </div>
+      {error && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+        <button type="button" onClick={() => { setStep("warning"); setError(""); setTotpCode(""); }} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
+          ← Volver
+        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" onClick={onClose} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
+            Cancelar
+          </button>
+          <button type="submit" disabled={loading || totpCode.length !== 6} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: loading || totpCode.length !== 6 ? "#fca5a5" : "#dc2626", color: "#fff", fontSize: 13, fontWeight: 700, cursor: loading || totpCode.length !== 6 ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+            {loading ? <span><span className="spin">⟳</span> Procesando...</span> : "🗑 Confirmar eliminación"}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+  // ─── PASO C: SUCCESS ───
+  const renderSuccess = () => (
+    <div>
+      <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 12, padding: 18, marginBottom: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#92400e", marginBottom: 8 }}>
+          ✓ Empresa marcada para eliminación
+        </div>
+        <div style={{ fontSize: 13, color: "#92400e", lineHeight: 1.6 }}>
+          Tu solicitud quedó registrada. Tenés <strong>30 días</strong> para cancelar la eliminación desde el banner amarillo que ahora aparece en el dashboard.
+          <br /><br />
+          Después de los 30 días, la empresa y todos sus datos se eliminarán <strong>permanentemente</strong>.
+        </div>
+      </div>
+      <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12, color: "#0369a1", lineHeight: 1.5 }}>
+        💡 <strong>Tip:</strong> Si cambiás de opinión, click "✕ Cancelar eliminación" en el banner amarillo del dashboard. El cambio es inmediato.
+      </div>
+      <button onClick={onClose} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+        Cerrar
+      </button>
+    </div>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 520, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#dc2626", fontWeight: 700 }}>ZONA DE PELIGRO</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4, color: "#0f172a" }}>
+              {step === "success" ? "✓ Eliminación programada" : "🗑 Eliminar empresa"}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
+        </div>
+        {step === "warning" && renderWarning()}
+        {step === "verify_2fa" && renderVerify2FA()}
+        {step === "success" && renderSuccess()}
+      </div>
+    </div>
+  );
+}
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ⭐ FASE C — CHANGE EMAIL MODAL
 // Modal de 2 pasos para cambiar el email del master de la empresa.
@@ -3860,6 +4090,7 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   const [empresaDeletedAt, setEmpresaDeletedAt] = useState(null);
  // ⭐ FASE C — modales de owner management
   const [showChangeEmail, setShowChangeEmail] = useState(false);
+ const [showDeleteEmpresa, setShowDeleteEmpresa] = useState(false);
   const [activeTab, setActiveTab] = useState("facturas");
   const [expandedCufe, setExpandedCufe] = useState(null);
   const [search, setSearch] = useState("");
@@ -4054,6 +4285,9 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
             <button onClick={() => setShowChangeEmail(true)} title="Cambiar email del administrador" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>📧 Email</button>
           )}
           <button onClick={onChangePassword} title="Cambiar contraseña" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🔑</button>
+         {session.role === "master" && session.is_owner === true && (
+            <button onClick={() => setShowDeleteEmpresa(true)} title="Eliminar empresa (acción destructiva)" style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#b91c1c" }}>🗑 Eliminar</button>
+          )}
           <button onClick={onLogout} title="Cerrar sesión" style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Salir</button>
         </div>
       </header>
@@ -4228,6 +4462,17 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
             // de email).
           }}
           onClose={() => setShowChangeEmail(false)}
+        />
+      )}
+     {showDeleteEmpresa && (
+        <DeleteEmpresaModal
+          session={session}
+          authFetch={authFetch}
+          onSuccess={(deletedAtIso) => {
+            // Hidratar el banner amarillo inmediatamente sin refresh
+            setEmpresaDeletedAt(deletedAtIso);
+          }}
+          onClose={() => setShowDeleteEmpresa(false)}
         />
       )}
 
