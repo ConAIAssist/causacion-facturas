@@ -1378,7 +1378,255 @@ function TwoFactorSettingsModal({ session, authFetch, onClose, onLogoutAfterDisa
     </div>
   );
 }
-
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE C — CHANGE EMAIL MODAL
+// Modal de 2 pasos para cambiar el email del master de la empresa.
+// 
+// PASO A (request):
+//   - Form con campo "nuevo email" + validación regex
+//   - POST /api/empresa/request-email-change con { nit, new_email }
+//   - Backend envía código 6 dígitos al NUEVO email
+//   - Pasa a paso B
+// 
+// PASO B (confirm):
+//   - Form con campo "código de 6 dígitos"
+//   - POST /api/empresa/confirm-email-change con { nit, code, new_email }
+//   - Backend valida hash + SWAP atómico email (Lección 44)
+//   - Modal cierra con success, parent actualiza session.email
+// 
+// Props:
+//   - session: { nit, email, ... } actual
+//   - authFetch: helper heredado
+//   - onSuccess: callback con el nuevo email
+//   - onClose: callback de cierre
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+const EMAIL_REGEX_CEMAIL = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+function ChangeEmailModal({ session, authFetch, onSuccess, onClose }) {
+  const [step, setStep] = useState("request"); // request | confirm | success
+  const [newEmail, setNewEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [pendingId, setPendingId] = useState(null);
+  const [expiresAtMs, setExpiresAtMs] = useState(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  // Countdown del código (TTL típico 15 min según L44)
+  useEffect(() => {
+    if (!expiresAtMs) return;
+    const compute = () => {
+      const remaining = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+    };
+    compute();
+    const interval = setInterval(compute, 1000);
+    return () => clearInterval(interval);
+  }, [expiresAtMs]);
+  const currentEmail = session?.email || session?.correo || "—";
+  async function handleRequest(e) {
+    e.preventDefault();
+    setError("");
+    const newEmailLower = newEmail.trim().toLowerCase();
+    if (!EMAIL_REGEX_CEMAIL.test(newEmailLower) || newEmailLower.length > 254) {
+      setError("Formato de email inválido");
+      return;
+    }
+    if (newEmailLower === String(currentEmail).toLowerCase()) {
+      setError("El nuevo email debe ser diferente al actual");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data } = await authFetch(CONFIG.EMPRESA_REQUEST_EMAIL_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, new_email: newEmailLower }),
+      });
+      if (data?.ok) {
+        setPendingId(data.pending_id || null);
+        // El backend devuelve expires_at ISO o expires_in_seconds. Usar lo que venga.
+        if (data.expires_at) {
+          setExpiresAtMs(new Date(data.expires_at).getTime());
+        } else if (data.expires_in_seconds) {
+          setExpiresAtMs(Date.now() + (data.expires_in_seconds * 1000));
+        } else {
+          setExpiresAtMs(Date.now() + (15 * 60 * 1000)); // fallback 15 min
+        }
+        setStep("confirm");
+      } else {
+        setError(data?.message || "No se pudo iniciar el cambio de email. Intenta de nuevo.");
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") {
+        setError(e.message || "Error de conexión.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function handleConfirm(e) {
+    e.preventDefault();
+    setError("");
+    if (!/^\d{6}$/.test(code)) {
+      setError("Ingresa el código de 6 dígitos");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data } = await authFetch(CONFIG.EMPRESA_CONFIRM_EMAIL_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          nit: session.nit,
+          new_email: newEmail.trim().toLowerCase(),
+          code: code.trim(),
+        }),
+      });
+      if (data?.ok) {
+        setStep("success");
+        // Notificar al parent — actualiza session.email
+        if (onSuccess) onSuccess(newEmail.trim().toLowerCase());
+      } else {
+        setError(data?.message || "Código inválido o expirado.");
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") {
+        setError(e.message || "Error de conexión.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+  function handleBack() {
+    setStep("request");
+    setCode("");
+    setError("");
+    setPendingId(null);
+    setExpiresAtMs(null);
+  }
+  // Render por step
+  const renderRequest = () => (
+    <form onSubmit={handleRequest}>
+      <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12, color: "#0369a1", lineHeight: 1.5 }}>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>ⓘ ¿Cómo funciona?</div>
+        Enviaremos un código de 6 dígitos al NUEVO email. Una vez que lo confirmes, el cambio será atómico.
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>EMAIL ACTUAL</label>
+        <div style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 14, color: "#475569", fontFamily: "monospace" }}>
+          {currentEmail}
+        </div>
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NUEVO EMAIL</label>
+        <input
+          type="email"
+          value={newEmail}
+          onChange={(e) => setNewEmail(e.target.value)}
+          placeholder="nuevo@empresa.com"
+          autoFocus
+          disabled={loading}
+          maxLength={254}
+          style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15, fontFamily: "inherit", boxSizing: "border-box" }}
+        />
+        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+          Recibirás un código de verificación en este email.
+        </div>
+      </div>
+      {error && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <button type="button" onClick={onClose} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
+          Cancelar
+        </button>
+        <button type="submit" disabled={loading || !newEmail} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: loading || !newEmail ? "#94a3b8" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: loading || !newEmail ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+          {loading ? <span><span className="spin">⟳</span> Enviando...</span> : "Enviar código"}
+        </button>
+      </div>
+    </form>
+  );
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = secondsLeft % 60;
+  const expired = secondsLeft === 0 && expiresAtMs !== null;
+  const renderConfirm = () => (
+    <form onSubmit={handleConfirm}>
+      <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12, color: "#166534", lineHeight: 1.5 }}>
+        📧 Te enviamos un código de 6 dígitos a <strong>{newEmail.trim().toLowerCase()}</strong>. Revisá tu bandeja (y spam).
+      </div>
+      {expiresAtMs && !expired && (
+        <div style={{ fontSize: 11, color: secondsLeft < 60 ? "#ef4444" : "#64748b", textAlign: "center", marginBottom: 12 }}>
+          Código expira en {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}
+        </div>
+      )}
+      {expired && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12, textAlign: "center" }}>
+          ⏱ El código expiró. Volvé al paso anterior y solicitá uno nuevo.
+        </div>
+      )}
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CÓDIGO DE 6 DÍGITOS</label>
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          placeholder="123456"
+          autoFocus
+          disabled={loading || expired}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 24, fontFamily: "monospace", textAlign: "center", letterSpacing: "0.4em", boxSizing: "border-box" }}
+        />
+      </div>
+      {error && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+        <button type="button" onClick={handleBack} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
+          ← Volver
+        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" onClick={onClose} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
+            Cancelar
+          </button>
+          <button type="submit" disabled={loading || code.length !== 6 || expired} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: loading || code.length !== 6 || expired ? "#94a3b8" : "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: loading || code.length !== 6 || expired ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+            {loading ? <span><span className="spin">⟳</span> Confirmando...</span> : "Confirmar cambio"}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+  const renderSuccess = () => (
+    <div>
+      <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10, padding: 16, marginBottom: 16, fontSize: 13, color: "#166534", lineHeight: 1.6 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>✓ Email cambiado exitosamente</div>
+        Tu nuevo email registrado es <strong>{newEmail.trim().toLowerCase()}</strong>. La próxima vez que inicies sesión, usarás este email.
+      </div>
+      <button onClick={onClose} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+        Cerrar
+      </button>
+    </div>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 460, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>EMAIL DEL ADMINISTRADOR</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>
+              {step === "success" ? "✓ Cambio completado" : "📧 Cambiar email"}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
+        </div>
+        {step === "request" && renderRequest()}
+        {step === "confirm" && renderConfirm()}
+        {step === "success" && renderSuccess()}
+      </div>
+    </div>
+  );
+}
 // ═══════════════════════════════════════════════════════════════
 // MODAL DE GESTIÓN DE SUB-USUARIOS (Fase 1 + reset 2FA Fase 2)
 // ═══════════════════════════════════════════════════════════════
@@ -3610,6 +3858,8 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   const [showAssistant, setShowAssistant] = useState(false);
  // ⭐ FASE C — empresa deletion state (se hidrata desde response de /api/facturas)
   const [empresaDeletedAt, setEmpresaDeletedAt] = useState(null);
+ // ⭐ FASE C — modales de owner management
+  const [showChangeEmail, setShowChangeEmail] = useState(false);
   const [activeTab, setActiveTab] = useState("facturas");
   const [expandedCufe, setExpandedCufe] = useState(null);
   const [search, setSearch] = useState("");
@@ -3800,6 +4050,9 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
             <button onClick={() => setShowDepartamentos(true)} title="Gestión de departamentos" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🏢 Departamentos</button>
           )}
           <button onClick={openTwoFactorSettings} title="2FA" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🛡 2FA</button>
+         {session.role === "master" && (
+            <button onClick={() => setShowChangeEmail(true)} title="Cambiar email del administrador" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>📧 Email</button>
+          )}
           <button onClick={onChangePassword} title="Cambiar contraseña" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🔑</button>
           <button onClick={onLogout} title="Cerrar sesión" style={{ background: "#0f172a", color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>Salir</button>
         </div>
@@ -3963,6 +4216,19 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
       )}
       {showDepartamentos && (
         <DepartamentosModal session={session} authFetch={authFetch} onClose={() => setShowDepartamentos(false)} />
+      )}
+     {showChangeEmail && (
+        <ChangeEmailModal
+          session={session}
+          authFetch={authFetch}
+          onSuccess={(newEmail) => {
+            // Nota: NO actualizamos session.email runtime porque eso requeriría
+            // setSession() en App, no en Dashboard. El usuario verá el cambio
+            // reflejado tras logout/login (que es el flow esperado tras cambio
+            // de email).
+          }}
+          onClose={() => setShowChangeEmail(false)}
+        />
       )}
 
       {/* Asistente flotante */}
