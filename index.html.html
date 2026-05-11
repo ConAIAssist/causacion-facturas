@@ -4682,7 +4682,10 @@ function App() {
       software_contable: data.software_contable || null,
       user_id: data.user_id || null,
       email: data.correo || data.email || null,
+    email: data.correo || data.email || null,
+      is_owner: Boolean(data.is_owner),
     };
+  
   }
 
   function handleLogin(data) {
