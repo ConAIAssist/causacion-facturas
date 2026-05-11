@@ -71,6 +71,21 @@ const CONFIG = {
 
   // ⭐ Onboarding (2.B.1.4)
   ONBOARDING_REGISTER_URL: "https://conaiassist.app.n8n.cloud/webhook/api/onboarding/register",
+ // ⭐ FASE C — Owner / Team Management (Fase B backend runtime ready)
+  TEAM_LIST_URL:                  "https://conaiassist.app.n8n.cloud/webhook/api/team/list",
+  USERS_PROMOTE_URL:              "https://conaiassist.app.n8n.cloud/webhook/api/users/promote-to-master",
+  USERS_DEMOTE_URL:               "https://conaiassist.app.n8n.cloud/webhook/api/users/demote-to-subuser",
+  USERS_DELETE_URL:               "https://conaiassist.app.n8n.cloud/webhook/api/users/delete",
+  // ⭐ FASE C — Empresa lifecycle (deletion + email change)
+  EMPRESA_REQUEST_DELETION_URL:   "https://conaiassist.app.n8n.cloud/webhook/api/empresa/request-deletion",
+  EMPRESA_CANCEL_DELETION_URL:    "https://conaiassist.app.n8n.cloud/webhook/api/empresa/cancel-deletion",
+  EMPRESA_REQUEST_EMAIL_URL:      "https://conaiassist.app.n8n.cloud/webhook/api/empresa/request-email-change",
+  EMPRESA_CONFIRM_EMAIL_URL:      "https://conaiassist.app.n8n.cloud/webhook/api/empresa/confirm-email-change",
+  // ⭐ FASE C — Ownership transfer (entre masters)
+  TRANSFER_REQUEST_URL:           "https://conaiassist.app.n8n.cloud/webhook/api/empresa/request-ownership-transfer",
+  TRANSFER_CANCEL_URL:            "https://conaiassist.app.n8n.cloud/webhook/api/empresa/cancel-ownership-transfer",
+  TRANSFER_REJECT_URL:            "https://conaiassist.app.n8n.cloud/webhook/api/empresa/reject-ownership-transfer",
+  TRANSFER_CONFIRM_URL:           "https://conaiassist.app.n8n.cloud/webhook/api/empresa/confirm-ownership-transfer",
 };
 
 const SOFTWARE_API_URLS = {
@@ -3468,6 +3483,117 @@ function AssistantFAB({ onClick, open }) {
     </button>
   );
 }
+ // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE C — DELETION GRACE BANNER
+// Muestra un banner amarillo en la parte superior del dashboard cuando la empresa
+// está marcada para eliminación (deleted_at != NULL). Cuenta regresiva hasta hard_delete
+// y botón "Cancelar eliminación" que llama al webhook empresa/cancel-deletion.
+// 
+// Props:
+//   - deletedAt: ISO string del momento de la solicitud de eliminación (o null)
+//   - graceDays: días de gracia configurados (default 30)
+//   - onCancelled: callback tras cancelación exitosa (refresh state padre)
+//   - authFetch: helper de auth heredado del Dashboard
+//   - nit: NIT actual de la session
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function DeletionGraceBanner({ deletedAt, graceDays = 30, onCancelled, authFetch, nit }) {
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState("");
+  if (!deletedAt) return null;
+  // Calcular cuándo expira el período de gracia
+  const deletedAtMs = new Date(deletedAt).getTime();
+  const expiresAtMs = deletedAtMs + (graceDays * 24 * 60 * 60 * 1000);
+  const nowMs = Date.now();
+  const remainingMs = Math.max(0, expiresAtMs - nowMs);
+  const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+  const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
+  const expired = remainingMs === 0;
+  const isLastDay = remainingDays <= 1 && !expired;
+  // Texto del countdown
+  let countdownText;
+  if (expired) {
+    countdownText = "Eliminación pendiente de procesar";
+  } else if (isLastDay) {
+    countdownText = `Eliminación en menos de ${remainingHours} hora${remainingHours !== 1 ? "s" : ""}`;
+  } else {
+    countdownText = `Eliminación en ${remainingDays} día${remainingDays !== 1 ? "s" : ""}`;
+  }
+  async function handleCancel() {
+    if (!confirm(`¿Cancelar la eliminación de la empresa?\n\nLa empresa permanecerá activa con todos sus datos.`)) return;
+    setCancelling(true);
+    setError("");
+    try {
+      const { data } = await authFetch(CONFIG.EMPRESA_CANCEL_DELETION_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit }),
+      });
+      if (data?.ok) {
+        if (onCancelled) onCancelled();
+      } else {
+        setError(data?.message || "No se pudo cancelar la eliminación. Intenta de nuevo.");
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") {
+        setError(e.message || "Error de conexión.");
+      }
+    } finally {
+      setCancelling(false);
+    }
+  }
+  // Colores según urgencia
+  const bgColor = expired ? "#fee2e2" : (isLastDay ? "#fed7aa" : "#fef3c7");
+  const borderColor = expired ? "#fecaca" : (isLastDay ? "#fdba74" : "#fbbf24");
+  const textColor = expired ? "#991b1b" : (isLastDay ? "#9a3412" : "#92400e");
+  const icon = expired ? "🔴" : (isLastDay ? "🟠" : "⏳");
+  return (
+    <div className="fade-in" style={{
+      background: bgColor,
+      borderBottom: `2px solid ${borderColor}`,
+      padding: "12px 24px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 16,
+      flexWrap: "wrap",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 20 }}>{icon}</span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: textColor }}>
+            Tu empresa está marcada para eliminación
+          </div>
+          <div style={{ fontSize: 11, color: textColor, marginTop: 2, opacity: 0.9 }}>
+            {countdownText} · Solicitada {dateStr(deletedAt)}. Puedes cancelar antes de que expire.
+          </div>
+          {error && (
+            <div style={{ fontSize: 11, color: "#991b1b", marginTop: 4, fontWeight: 600 }}>
+              ⚠ {error}
+            </div>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={handleCancel}
+        disabled={cancelling || expired}
+        style={{
+          padding: "8px 16px",
+          borderRadius: 8,
+          border: "none",
+          background: cancelling || expired ? "#94a3b8" : "#0f172a",
+          color: "#fff",
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: cancelling || expired ? "not-allowed" : "pointer",
+          fontFamily: "inherit",
+          whiteSpace: "nowrap",
+          flexShrink: 0,
+        }}
+      >
+        {cancelling ? "Cancelando..." : (expired ? "Procesando..." : "✕ Cancelar eliminación")}
+      </button>
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // DASHBOARD (componente principal — modificado con tab 🚫 Rechazos)
@@ -3482,6 +3608,8 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   const [showSubUsers, setShowSubUsers] = useState(false);
   const [showDepartamentos, setShowDepartamentos] = useState(false);
   const [showAssistant, setShowAssistant] = useState(false);
+ // ⭐ FASE C — empresa deletion state (se hidrata desde response de /api/facturas)
+  const [empresaDeletedAt, setEmpresaDeletedAt] = useState(null);
   const [activeTab, setActiveTab] = useState("facturas");
   const [expandedCufe, setExpandedCufe] = useState(null);
   const [search, setSearch] = useState("");
@@ -3533,6 +3661,12 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
       setFacturas(normalized);
       // credentials may come piggy-backed
       if (data.credentials) setCredentials(data.credentials);
+     // ⭐ FASE C — hidratar deletedAt desde response del backend
+      // El webhook /api/facturas devuelve empresa_deleted_at si la empresa está
+      // marcada para borrar. NULL si está activa normalmente.
+      if (typeof data.empresa_deleted_at !== "undefined") {
+        setEmpresaDeletedAt(data.empresa_deleted_at || null);
+      }
     } catch (e) {
       if (e.message !== "SESSION_EXPIRED") setError("No se pudieron cargar las facturas: " + e.message);
     } finally {
@@ -3641,6 +3775,14 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   return (
     <div style={{ minHeight: "100vh", background: "#f0f2f5" }}>
       {/* Header */}
+     {/* ⭐ FASE C — Banner de eliminación pendiente (solo si deleted_at != NULL) */}
+      <DeletionGraceBanner
+        deletedAt={empresaDeletedAt}
+        graceDays={30}
+        nit={session.nit}
+        authFetch={authFetch}
+        onCancelled={() => { setEmpresaDeletedAt(null); fetchFacturas(); }}
+      />
       <header style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>CONAI SMARTBILL</div>
