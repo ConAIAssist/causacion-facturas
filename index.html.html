@@ -43,9 +43,7 @@ const CONFIG = {
   REQUEST_RESET_URL: "https://conaiassist.app.n8n.cloud/webhook/api/request-password-reset",
   // Sub-usuarios (Fase 1)
   SUB_USER_LOGIN_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-user-login",
-  SUB_USERS_LIST_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/list",
   SUB_USERS_CREATE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/create",
-  SUB_USERS_DELETE_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/delete",
   SUB_USER_REQUEST_PW_URL: "https://conaiassist.app.n8n.cloud/webhook/api/sub-users/request-password-change",
   // 2FA (Fase 2)
   TWOFA_ENROLL_START_URL: "https://conaiassist.app.n8n.cloud/webhook/api/2fa/enroll/start",
@@ -1857,16 +1855,36 @@ function ChangeEmailModal({ session, authFetch, onSuccess, onClose }) {
     </div>
   );
 }
-// ═══════════════════════════════════════════════════════════════
-// MODAL DE GESTIÓN DE SUB-USUARIOS (Fase 1 + reset 2FA Fase 2)
-// ═══════════════════════════════════════════════════════════════
-function SubUsersModal({ session, onClose, authFetch }) {
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE C — TEAM MODAL (reemplaza SubUsersModal viejo)
+// Gestión completa del equipo de la empresa con 2 tabs: Masters + Sub-usuarios.
+// 
+// Features:
+//   - Tabs separados Masters / Sub-usuarios con contadores
+//   - Badge 👑 OWNER en el usuario que es owner
+//   - Badge "Tú" en self
+//   - Botones de acción contextuales según role + is_owner + is_self:
+//       * Sub-user: [⬆ Promote] [🔄 Reset 2FA] [🗑]
+//       * Master: [⬇ Demote] [🔄 Reset 2FA] [🗑]   (excepto si es self+owner)
+//   - Creación de sub-users con password inicial
+//   - Confirmaciones de seguridad para acciones destructivas
+// 
+// Webhooks:
+//   - CONFIG.TEAM_LIST_URL       (lista all)
+//   - CONFIG.SUB_USERS_CREATE_URL (existente, sin cambio)
+//   - CONFIG.USERS_PROMOTE_URL   (sub-user → master)
+//   - CONFIG.USERS_DEMOTE_URL    (master → sub-user, NO owner)
+//   - CONFIG.USERS_DELETE_URL    (unificado, con guards de owner/last_master)
+//   - CONFIG.TWOFA_RESET_SUBUSER_URL (existente, sin cambio)
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function TeamModal({ session, onClose, authFetch }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState("masters"); // masters | sub_users
   const [showCreate, setShowCreate] = useState(false);
-  const [deleting, setDeleting] = useState(null);
-  const [resetting2FA, setResetting2FA] = useState(null);
+  const [busyAction, setBusyAction] = useState(null); // { type, user_id }
+  // Form de creación
   const [newNombre, setNewNombre] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -1875,21 +1893,25 @@ function SubUsersModal({ session, onClose, authFetch }) {
   const fetchUsers = async () => {
     setLoading(true); setError("");
     try {
-      const { data } = await authFetch(CONFIG.SUB_USERS_LIST_URL, {
+      const { data } = await authFetch(CONFIG.TEAM_LIST_URL, {
         method: "POST",
         body: JSON.stringify({ nit: session.nit }),
       });
       setUsers(data.users || []);
     } catch (e) {
-      if (e.message !== 'SESSION_EXPIRED') setError("No se pudieron cargar los usuarios: " + e.message);
+      if (e.message !== "SESSION_EXPIRED") setError("No se pudo cargar el equipo: " + e.message);
+    } finally {
+      setLoading(false);
     }
-    finally { setLoading(false); }
   };
   useEffect(() => { fetchUsers(); }, []);
+  // Crear sub-user
   const handleCreate = async (e) => {
     e.preventDefault();
     setCreateError("");
-    if (!newNombre.trim() || !newEmail.trim() || !newPassword) { setCreateError("Todos los campos son requeridos"); return; }
+    if (!newNombre.trim() || !newEmail.trim() || !newPassword) {
+      setCreateError("Todos los campos son requeridos"); return;
+    }
     if (!newEmail.includes("@")) { setCreateError("Email inválido"); return; }
     const strengthErr = checkPasswordStrength(newPassword, { nit: session.nit, email: newEmail });
     if (strengthErr) { setCreateError(strengthErr); return; }
@@ -1904,37 +1926,113 @@ function SubUsersModal({ session, onClose, authFetch }) {
           password: newPassword,
         }),
       });
-      if (!data.success) { setCreateError(data.error || "No se pudo crear el usuario"); setCreating(false); return; }
+      if (!data.success) { setCreateError(data.error || "No se pudo crear el usuario"); return; }
       setNewNombre(""); setNewEmail(""); setNewPassword("");
       setShowCreate(false);
       await fetchUsers();
     } catch (e) {
-      if (e.message !== 'SESSION_EXPIRED') setCreateError(e.message);
-    }
-    finally { setCreating(false); }
+      if (e.message !== "SESSION_EXPIRED") setCreateError(e.message);
+    } finally { setCreating(false); }
   };
-  const handleDelete = async (user) => {
-    if (!confirm(`¿Eliminar al usuario ${user.nombre} (${user.email})? Esta acción no se puede deshacer.`)) return;
-    setDeleting(user.user_id);
+  // Promote sub-user → master
+  const handlePromote = async (user) => {
+    if (!confirm(
+      `¿Promover a ${user.nombre} (${user.email}) a MASTER?\n\n` +
+      `Como master tendrá:\n` +
+      `• Acceso completo al dashboard\n` +
+      `• Permisos para crear/eliminar usuarios\n` +
+      `• Permisos para configurar APIs e impuestos\n\n` +
+      `Esta acción puede revertirse después.`
+    )) return;
+    setBusyAction({ type: "promote", user_id: user.user_id });
     try {
-      await authFetch(CONFIG.SUB_USERS_DELETE_URL, {
+      const { data } = await authFetch(CONFIG.USERS_PROMOTE_URL, {
         method: "POST",
-        body: JSON.stringify({ nit: session.nit, user_id: user.user_id }),
+        body: JSON.stringify({ nit: session.nit, target_user_id: user.user_id }),
       });
-      await fetchUsers();
+      if (data?.ok || data?.success) {
+        await fetchUsers();
+        setActiveTab("masters"); // mover al tab donde aparece ahora
+      } else {
+        alert("Error al promover: " + (data?.message || data?.error || "desconocido"));
+      }
     } catch (e) {
-      if (e.message !== 'SESSION_EXPIRED') alert("Error al eliminar: " + e.message);
-    }
-    finally { setDeleting(null); }
+      if (e.message !== "SESSION_EXPIRED") alert("Error: " + e.message);
+    } finally { setBusyAction(null); }
   };
+  // Demote master → sub-user
+  const handleDemote = async (user) => {
+    if (user.is_owner) {
+      alert("No se puede degradar al OWNER. Primero transferí la propiedad a otro master.");
+      return;
+    }
+    if (!confirm(
+      `¿Degradar a ${user.nombre} (${user.email}) a SUB-USUARIO?\n\n` +
+      `Como sub-usuario perderá:\n` +
+      `• Acceso a gestión de usuarios\n` +
+      `• Configuración de APIs e impuestos\n` +
+      `• Eliminación de empresa\n\n` +
+      `Mantendrá su acceso al dashboard. Esta acción puede revertirse.`
+    )) return;
+    setBusyAction({ type: "demote", user_id: user.user_id });
+    try {
+      const { data } = await authFetch(CONFIG.USERS_DEMOTE_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, target_user_id: user.user_id }),
+      });
+      if (data?.ok || data?.success) {
+        await fetchUsers();
+        setActiveTab("sub_users");
+      } else {
+        alert("Error al degradar: " + (data?.message || data?.error || "desconocido"));
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") alert("Error: " + e.message);
+    } finally { setBusyAction(null); }
+  };
+  // Delete unificado (master o sub-user)
+  const handleDelete = async (user) => {
+    if (user.is_owner) {
+      alert("No se puede eliminar al OWNER. Primero transferí la propiedad a otro master."); return;
+    }
+    if (user.is_self) {
+      alert("No podés eliminarte a vos mismo."); return;
+    }
+    const isMaster = user.role === "master";
+    const warning = isMaster
+      ? `⚠ Vas a eliminar a un MASTER (${user.nombre}, ${user.email}).\n\nPerderá acceso inmediato y NO podrá ser revertido.\n\n¿Continuar?`
+      : `¿Eliminar al sub-usuario ${user.nombre} (${user.email})? Esta acción no se puede deshacer.`;
+    if (!confirm(warning)) return;
+    setBusyAction({ type: "delete", user_id: user.user_id });
+    try {
+      const { data } = await authFetch(CONFIG.USERS_DELETE_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, target_user_id: user.user_id }),
+      });
+      if (data?.ok || data?.success) {
+        await fetchUsers();
+      } else {
+        const errCode = data?.error_code || data?.outcome;
+        const msgMap = {
+          'self_delete_forbidden':   "No podés eliminarte a vos mismo.",
+          'target_is_owner':         "No se puede eliminar al OWNER. Transferí la propiedad primero.",
+          'last_master':             "No se puede eliminar el último master de la empresa.",
+        };
+        alert(msgMap[errCode] || "Error: " + (data?.message || data?.error || "desconocido"));
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") alert("Error: " + e.message);
+    } finally { setBusyAction(null); }
+  };
+  // Reset 2FA del sub-user (legacy, requiere TOTP del master)
   const handleReset2FA = async (user) => {
     const masterCode = prompt(
-      `Para resetear el 2FA de ${user.nombre}, ingresa el código de 6 dígitos de TU app de autenticación.\n\n` +
-      `El usuario ${user.email} tendrá que configurar 2FA de nuevo en su próximo login.`
+      `Para resetear el 2FA de ${user.nombre}, ingresá el código de 6 dígitos de TU app de autenticación.\n\n` +
+      `${user.email} tendrá que configurar 2FA de nuevo en su próximo login.`
     );
     if (!masterCode) return;
     if (!/^\d{6}$/.test(masterCode.trim())) { alert("Código inválido. Debe ser de 6 dígitos."); return; }
-    setResetting2FA(user.user_id);
+    setBusyAction({ type: "reset2fa", user_id: user.user_id });
     try {
       const { data } = await authFetch(CONFIG.TWOFA_RESET_SUBUSER_URL, {
         method: "POST",
@@ -1945,115 +2043,176 @@ function SubUsersModal({ session, onClose, authFetch }) {
         }),
       });
       if (!data.success) { alert("Error al resetear 2FA: " + (data.error || "desconocido")); return; }
-      alert(`✓ 2FA de ${user.nombre} reseteado. En su próximo login configurará 2FA de nuevo.`);
+      alert(`✓ 2FA de ${user.nombre} reseteado.`);
       await fetchUsers();
     } catch (e) {
-      if (e.message !== 'SESSION_EXPIRED') alert("Error: " + e.message);
-    } finally { setResetting2FA(null); }
+      if (e.message !== "SESSION_EXPIRED") alert("Error: " + e.message);
+    } finally { setBusyAction(null); }
+  };
+  // Filtrado por tab
+  const masters   = users.filter(u => u.role === "master");
+  const subUsers  = users.filter(u => u.role === "sub_user");
+  const displayed = activeTab === "masters" ? masters : subUsers;
+  // ─── UI ───
+  const renderUserCard = (u) => {
+    const isBusy = busyAction?.user_id === u.user_id;
+    const isMaster = u.role === "master";
+    return (
+      <div key={u.user_id} style={{
+        background: u.is_self ? "#f0f9ff" : "#f8fafc",
+        border: u.is_self ? "1px solid #bae6fd" : "1px solid #e2e8f0",
+        borderRadius: 10, padding: 14, display: "flex", alignItems: "center", gap: 12
+      }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: "50%",
+          background: u.status === "disabled" ? "#f1f5f9" : (u.is_owner ? "#fef3c7" : (isMaster ? "#dcfce7" : "#dbeafe")),
+          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0
+        }}>
+          {u.status === "disabled" ? "🚫" : (u.is_owner ? "👑" : (isMaster ? "🛡" : "👤"))}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            {u.nombre || "(sin nombre)"}
+            {u.is_owner && <span style={{ fontSize: 9, background: "#fef3c7", color: "#92400e", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>👑 OWNER</span>}
+            {u.is_self && <span style={{ fontSize: 9, background: "#dbeafe", color: "#1e40af", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>TÚ</span>}
+          </div>
+          <div style={{ fontSize: 11, color: "#64748b" }}>{u.email}</div>
+          <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+            {u.has_pending_change && (
+              <span style={{ fontSize: 9, background: "#fef3c7", color: "#92400e", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>⏳ CAMBIO PASSWORD PENDIENTE</span>
+            )}
+            {u.status === "disabled" && (
+              <span style={{ fontSize: 9, background: "#fee2e2", color: "#991b1b", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>DESACTIVADO</span>
+            )}
+            {u.twofa_enabled && (
+              <span style={{ fontSize: 9, background: "#dcfce7", color: "#166534", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>🛡 2FA</span>
+            )}
+            {u.last_login_at && (
+              <span style={{ fontSize: 9, color: "#94a3b8" }}>Último: {dateStr(u.last_login_at)}</span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {/* Promote sub-user → master */}
+          {!isMaster && !u.is_self && (
+            <button onClick={() => handlePromote(u)} disabled={isBusy} title="Promover a master"
+              style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #86efac", background: "#f0fdf4", fontSize: 10, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer", color: "#166534" }}>
+              {isBusy && busyAction?.type === "promote" ? "..." : "⬆ Promover"}
+            </button>
+          )}
+          {/* Demote master → sub-user (NO owner, NO self) */}
+          {isMaster && !u.is_owner && !u.is_self && (
+            <button onClick={() => handleDemote(u)} disabled={isBusy} title="Degradar a sub-usuario"
+              style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fffbeb", fontSize: 10, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer", color: "#92400e" }}>
+              {isBusy && busyAction?.type === "demote" ? "..." : "⬇ Degradar"}
+            </button>
+          )}
+          {/* Reset 2FA (solo sub-users con 2FA activo, no self) */}
+          {!isMaster && u.twofa_enabled && !u.is_self && (
+            <button onClick={() => handleReset2FA(u)} disabled={isBusy} title="Resetear 2FA"
+              style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fffbeb", fontSize: 10, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer", color: "#92400e" }}>
+              {isBusy && busyAction?.type === "reset2fa" ? "..." : "🔄 Reset 2FA"}
+            </button>
+          )}
+          {/* Delete (NO owner, NO self) */}
+          {!u.is_owner && !u.is_self && (
+            <button onClick={() => handleDelete(u)} disabled={isBusy} title="Eliminar usuario"
+              style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", fontSize: 10, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer", color: "#b91c1c" }}>
+              {isBusy && busyAction?.type === "delete" ? "..." : "🗑 Eliminar"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 640, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 720, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
           <div>
-            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>GESTIÓN DE USUARIOS</div>
-            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>👥 Usuarios de la empresa</div>
-            <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>Crea cuentas adicionales para tu equipo. Todos comparten el mismo dashboard.</div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#64748b", fontWeight: 600 }}>EQUIPO DE LA EMPRESA</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4 }}>👥 Gestión de usuarios</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+              Administra los masters y sub-usuarios. El owner (👑) no se puede degradar ni eliminar — primero hay que transferir la propiedad.
+            </div>
           </div>
           <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
         </div>
-        {!showCreate && (
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 0, marginBottom: 16, background: "#f1f5f9", padding: 4, borderRadius: 10 }}>
+          <button onClick={() => setActiveTab("masters")} style={{
+            flex: 1, padding: "8px 12px", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700,
+            cursor: "pointer", fontFamily: "inherit",
+            background: activeTab === "masters" ? "#fff" : "transparent",
+            color: activeTab === "masters" ? "#0f172a" : "#64748b",
+            boxShadow: activeTab === "masters" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+          }}>🛡 Masters ({masters.length})</button>
+          <button onClick={() => setActiveTab("sub_users")} style={{
+            flex: 1, padding: "8px 12px", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700,
+            cursor: "pointer", fontFamily: "inherit",
+            background: activeTab === "sub_users" ? "#fff" : "transparent",
+            color: activeTab === "sub_users" ? "#0f172a" : "#64748b",
+            boxShadow: activeTab === "sub_users" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+          }}>👤 Sub-usuarios ({subUsers.length})</button>
+        </div>
+        {/* Botón + form de creación (solo visible en tab sub_users) */}
+        {activeTab === "sub_users" && !showCreate && (
           <button onClick={() => setShowCreate(true)} style={{ width: "100%", padding: 12, borderRadius: 10, border: "2px dashed #cbd5e1", background: "#f8fafc", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569", marginBottom: 16 }}>
-            + Agregar usuario
+            + Agregar sub-usuario
           </button>
         )}
-        {showCreate && (
+        {activeTab === "sub_users" && showCreate && (
           <form onSubmit={handleCreate} style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 12, padding: 20, marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 12, letterSpacing: "0.1em" }}>NUEVO USUARIO</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#0369a1", marginBottom: 12, letterSpacing: "0.1em" }}>NUEVO SUB-USUARIO</div>
             <div style={{ marginBottom: 10 }}>
               <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>NOMBRE</label>
               <input type="text" value={newNombre} onChange={(e) => setNewNombre(e.target.value)} placeholder="Ej: Juan Pérez" autoFocus disabled={creating}
-                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
+                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, boxSizing: "border-box" }} />
             </div>
             <div style={{ marginBottom: 10 }}>
               <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>EMAIL</label>
               <input type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="juan@empresa.com" disabled={creating}
-                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13 }} />
+                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, boxSizing: "border-box" }} />
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: "block", fontSize: 10, color: "#475569", fontWeight: 600, marginBottom: 4 }}>CONTRASEÑA INICIAL</label>
               <input type="text" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 12 caracteres" disabled={creating}
-                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace" }} />
+                style={{ width: "100%", padding: "9px 12px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 13, fontFamily: "monospace", boxSizing: "border-box" }} />
               <PasswordStrengthHint password={newPassword} opts={{ nit: session.nit, email: newEmail }} />
-              <div style={{ fontSize: 10, color: "#64748b", marginTop: 4 }}>Compártela de forma segura con el usuario. Ellos podrán pedir cambiarla después (con tu aprobación).</div>
+              <div style={{ fontSize: 10, color: "#64748b", marginTop: 4 }}>Compártela de forma segura. El sub-usuario podrá pedir cambiarla después (con tu aprobación).</div>
             </div>
             {createError && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#991b1b", marginBottom: 10 }}>{createError}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button type="button" onClick={() => { setShowCreate(false); setCreateError(""); }} disabled={creating} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>Cancelar</button>
               <button type="submit" disabled={creating} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontSize: 12, fontWeight: 700, cursor: creating ? "not-allowed" : "pointer" }}>
-                {creating ? "Creando..." : "Crear usuario"}
+                {creating ? "Creando..." : "Crear sub-usuario"}
               </button>
             </div>
           </form>
         )}
         {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
         {loading ? (
-          <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 13 }}><span className="spin">⟳</span> Cargando usuarios...</div>
-        ) : users.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 13 }}><span className="spin">⟳</span> Cargando equipo...</div>
+        ) : displayed.length === 0 ? (
           <div style={{ textAlign: "center", padding: 40, color: "#94a3b8", fontSize: 13 }}>
-            No hay usuarios adicionales. Crea el primero arriba.
+            {activeTab === "masters"
+              ? "No hay masters adicionales (sólo vos)."
+              : "No hay sub-usuarios. Agregá el primero arriba."}
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {users.map(u => (
-              <div key={u.user_id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 14, display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: "50%", background: u.status === "disabled" ? "#f1f5f9" : "#dbeafe", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>
-                  {u.status === "disabled" ? "🚫" : "👤"}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{u.nombre}</div>
-                  <div style={{ fontSize: 11, color: "#64748b" }}>{u.email}</div>
-                  <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                    {u.has_pending_change && (
-                      <span style={{ fontSize: 9, background: "#fef3c7", color: "#92400e", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>⏳ CAMBIO PENDIENTE</span>
-                    )}
-                    {u.status === "disabled" && (
-                      <span style={{ fontSize: 9, background: "#fee2e2", color: "#991b1b", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>DESACTIVADO</span>
-                    )}
-                    {u.twofa_enabled && (
-                      <span style={{ fontSize: 9, background: "#dcfce7", color: "#166534", padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>🛡 2FA</span>
-                    )}
-                    {u.last_login_at && (
-                      <span style={{ fontSize: 9, color: "#94a3b8" }}>Último acceso: {dateStr(u.last_login_at)}</span>
-                    )}
-                  </div>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {u.twofa_enabled && (
-                    <button onClick={() => handleReset2FA(u)} disabled={resetting2FA === u.user_id} title="Resetear 2FA del usuario"
-                      style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fffbeb", fontSize: 10, fontWeight: 600, cursor: resetting2FA === u.user_id ? "not-allowed" : "pointer", color: "#92400e" }}>
-                      {resetting2FA === u.user_id ? "..." : "🔄 Reset 2FA"}
-                    </button>
-                  )}
-                  <button onClick={() => handleDelete(u)} disabled={deleting === u.user_id}
-                    style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fecaca", background: "#fff", fontSize: 10, fontWeight: 600, cursor: deleting === u.user_id ? "not-allowed" : "pointer", color: "#b91c1c" }}>
-                    {deleting === u.user_id ? "..." : "Eliminar"}
-                  </button>
-                </div>
-              </div>
-            ))}
+            {displayed.map(renderUserCard)}
           </div>
         )}
         {users.length > 0 && users.some(u => u.has_pending_change) && (
           <div style={{ marginTop: 16, padding: "10px 14px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontSize: 11, color: "#92400e" }}>
-            💡 Revisa tu correo para aprobar o rechazar los cambios de contraseña pendientes.
+            💡 Revisá tu correo para aprobar o rechazar los cambios de contraseña pendientes.
           </div>
         )}
       </div>
     </div>
   );
 }
-
 // ═══════════════════════════════════════════════════════════════
 // MODAL DE CONFIGURACIÓN DE IMPUESTOS (Tax Mapping)
 // Mapea tipos de impuestos colombianos (DIAN) a IDs internos del ERP
@@ -4083,7 +4242,7 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
   const [credentials, setCredentials] = useState(null);
   const [showApiSettings, setShowApiSettings] = useState(false);
   const [showTaxMapping, setShowTaxMapping] = useState(false);
-  const [showSubUsers, setShowSubUsers] = useState(false);
+  const [showTeam, setShowTeam] = useState(false);
   const [showDepartamentos, setShowDepartamentos] = useState(false);
   const [showAssistant, setShowAssistant] = useState(false);
  // ⭐ FASE C — empresa deletion state (se hidrata desde response de /api/facturas)
@@ -4275,7 +4434,7 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
             <button onClick={() => setShowTaxMapping(true)} title="Configurar impuestos del ERP" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>💸 Impuestos</button>
           )}
           {session.role === "master" && (
-            <button onClick={() => setShowSubUsers(true)} title="Gestión de usuarios" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>👥 Usuarios</button>
+            <button onClick={() => setShowTeam(true)} title="Gestión de equipo (masters + sub-usuarios)" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>👥 Equipo</button>
           )}
           {session.role === "master" && (
             <button onClick={() => setShowDepartamentos(true)} title="Gestión de departamentos" style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#475569" }}>🏢 Departamentos</button>
@@ -4445,8 +4604,8 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
           onClose={() => setShowTaxMapping(false)}
         />
       )}
-      {showSubUsers && (
-        <SubUsersModal session={session} authFetch={authFetch} onClose={() => setShowSubUsers(false)} />
+      {showTeam && (
+        <TeamModal session={session} authFetch={authFetch} onClose={() => setShowTeam(false)} />
       )}
       {showDepartamentos && (
         <DepartamentosModal session={session} authFetch={authFetch} onClose={() => setShowDepartamentos(false)} />
