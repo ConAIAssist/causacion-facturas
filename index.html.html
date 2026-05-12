@@ -358,7 +358,7 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
     setError("");
     const nitLimpio = nit.replace(/\D/g, "");
     if (!nitLimpio || nitLimpio.length < 6) { setError("Ingresa un NIT válido (mínimo 6 dígitos)"); return; }
-    if (loginType === "sub_user" && (!email || !email.includes("@"))) { setError("Ingresa un email válido"); return; }
+    if (!email || !email.includes("@")) { setError("Ingresa un email válido"); return; }
     if (!password) { setError("Ingresa tu contraseña"); return; }
     setLoading(true);
     try {
@@ -366,7 +366,7 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
       if (loginType === "master") {
         const res = await fetch(CONFIG.LOGIN_URL, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ nit: nitLimpio, password }),
+          body: JSON.stringify({ nit: nitLimpio, email: email.trim().toLowerCase(), password }),
         });
         if (!res.ok) throw new Error(`Error del servidor (${res.status})`);
         const text = await res.text();
@@ -398,7 +398,7 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
           userType: data.user_type || (loginType === "master" ? "master" : "sub_user"),
           empresa: data.empresa || null,
           nombre: data.nombre || null,
-          correo: data.correo || (loginType === "sub_user" ? email.trim().toLowerCase() : null),
+          correo: data.correo || email.trim().toLowerCase(),
           softwareContable: data.software_contable || null,
           actividad: data.actividad || null,
           credentials: data.credentials || null,
@@ -419,7 +419,7 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
       onLogin({ ...data, nit: nitLimpio, role: loginType === "master" ? "master" : "sub_user" });
     } catch (err) { setError(err.message); setLoading(false); }
   };
-  const canSubmit = nit && password && (loginType === "master" || email);
+  const canSubmit = nit && email && password;
   return (
     <AuthLayout title="Causación de Facturas" subtitle={loginType === "master" ? "Inicia sesión con el NIT de tu empresa" : "Inicia sesión con tu cuenta de usuario"}>
       <div style={{ display: "flex", gap: 0, marginBottom: 18, background: "#f1f5f9", padding: 4, borderRadius: 10 }}>
@@ -447,13 +447,11 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
           <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>Solo números, sin dígito de verificación</div>
         </div>
-        {loginType === "sub_user" && (
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CORREO ELECTRÓNICO</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@empresa.com" disabled={loading}
-              style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
-          </div>
-        )}
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CORREO ELECTRÓNICO</label>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@empresa.com" disabled={loading} autoComplete="email"
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
+        </div>
         <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CONTRASEÑA</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" disabled={loading}
