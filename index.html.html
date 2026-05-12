@@ -554,6 +554,258 @@ function ForgotPasswordScreen({ onBack }) {
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 const ONBOARDING_SOFTWARE_OPTIONS = ["Siigo", "Alegra", "Loggro", "Mantis", "Cuenti", "World Office", "Odoo"];
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// HABEAS DATA — Textos legales + componente LegalDocumentModal
+// Ley 1581 de 2012 (Colombia) + Decreto 1377 de 2013
+// Versión 1.0 — May 10, 2026
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+const LEGAL_VERSION_TERMS = "1.0";
+const LEGAL_VERSION_PRIVACY = "1.0";
+const LEGAL_VERSION_DATE = "10 de mayo de 2026";
+
+const PRIVACY_POLICY_TEXT = `POLÍTICA DE TRATAMIENTO DE DATOS PERSONALES
+Versión ${LEGAL_VERSION_PRIVACY} — ${LEGAL_VERSION_DATE}
+
+En cumplimiento de la Ley 1581 de 2012, el Decreto 1377 de 2013 y demás normas concordantes de protección de datos personales en Colombia, ConAIAssist informa al Titular la presente Política de Tratamiento de Datos Personales aplicable al servicio CONAI Smartbill.
+
+1. RESPONSABLE DEL TRATAMIENTO
+
+Razón social:      ConAIAssist
+Servicio:          CONAI Smartbill
+País:              Colombia
+Correo contacto:   privacidad@conaiassist.co
+Sitio web:         conaiassist.co
+
+2. DATOS PERSONALES QUE SE RECOLECTAN
+
+CONAI Smartbill recolecta y trata los siguientes datos personales:
+
+a) Datos de identificación de la empresa: NIT, razón social, actividad económica.
+b) Datos de contacto del administrador: nombre, correo electrónico.
+c) Datos de credenciales: contraseñas (almacenadas con hash bcrypt), tokens de autenticación de dos factores.
+d) Datos de uso: dirección IP, navegador, fecha y hora de acceso, acciones realizadas en la plataforma.
+e) Datos de facturación electrónica: CUFE, números de factura, montos, datos de emisores y receptores, productos facturados.
+f) Datos de integración: credenciales encriptadas para conexión con el software contable del cliente (almacenadas con cifrado AES-256).
+
+NO se recolectan datos sensibles según el artículo 5 de la Ley 1581 (origen racial, salud, biométricos, etc.).
+
+3. FINALIDADES DEL TRATAMIENTO
+
+Los datos recolectados se tratan exclusivamente para:
+
+a) Prestar el servicio de procesamiento de facturación electrónica DIAN.
+b) Autenticar al usuario y proteger la seguridad de la cuenta.
+c) Procesar y validar facturas recibidas por correo electrónico.
+d) Realizar análisis automatizado con inteligencia artificial para clasificación contable.
+e) Enrutar facturas para aprobación según los departamentos configurados por el cliente.
+f) Integrar las facturas aprobadas con el software contable seleccionado.
+g) Cumplir obligaciones legales, contables y tributarias derivadas del uso del servicio.
+h) Generar registros de auditoría para fines de seguridad y cumplimiento.
+i) Comunicar al Titular información relevante sobre el servicio.
+
+4. DERECHOS DEL TITULAR
+
+De conformidad con el artículo 8 de la Ley 1581 de 2012, el Titular tiene derecho a:
+
+a) Conocer, actualizar y rectificar sus datos personales.
+b) Solicitar prueba de la autorización otorgada al Responsable.
+c) Ser informado, previa solicitud, respecto del uso que se ha dado a sus datos personales.
+d) Presentar ante la Superintendencia de Industria y Comercio (SIC) quejas por infracciones a la Ley.
+e) Revocar la autorización y solicitar la supresión de sus datos cuando no se respeten los principios, derechos y garantías constitucionales y legales.
+f) Acceder en forma gratuita a sus datos personales que hayan sido objeto de tratamiento.
+
+5. MECANISMOS PARA EJERCER LOS DERECHOS
+
+El Titular puede ejercer sus derechos enviando una solicitud al correo privacidad@conaiassist.co con la siguiente información mínima:
+
+- Nombre completo y NIT de la empresa
+- Descripción clara de la solicitud (consulta, rectificación, supresión, etc.)
+- Documento de identidad del solicitante
+
+ConAIAssist responderá en los plazos establecidos por la Ley:
+- Consultas: máximo 10 días hábiles.
+- Reclamos: máximo 15 días hábiles.
+
+6. ENCARGADOS DEL TRATAMIENTO
+
+Para prestar el servicio, ConAIAssist comparte datos con los siguientes encargados, todos sujetos a sus propias políticas de privacidad y obligaciones contractuales:
+
+- Supabase (base de datos PostgreSQL) — Servidores en AWS.
+- n8n Cloud (orquestación de workflows) — Servidores en la Unión Europea.
+- Vercel (hosting del frontend) — Servidores en Estados Unidos.
+- Anthropic (procesamiento con inteligencia artificial) — Servidores en Estados Unidos.
+- Google (acceso a correos electrónicos del cliente vía Gmail API, solo cuando el cliente lo autoriza).
+
+7. TRANSFERENCIAS INTERNACIONALES
+
+Algunos encargados procesan datos en Estados Unidos y la Unión Europea. En todos los casos, ConAIAssist verifica que dichos encargados cuenten con estándares adecuados de seguridad y protección de datos. El uso del servicio implica la autorización expresa del Titular para estas transferencias.
+
+8. PLAZO DE CONSERVACIÓN
+
+Los datos personales se conservarán mientras dure la relación entre el Titular y CONAI Smartbill, y por los plazos adicionales requeridos por la legislación contable y tributaria colombiana (mínimo 5 años para registros relacionados con facturación electrónica DIAN, conforme al artículo 28 de la Ley 962 de 2005).
+
+9. VIGENCIA Y CAMBIOS
+
+Esta Política entra en vigencia el ${LEGAL_VERSION_DATE} y puede ser modificada por ConAIAssist con notificación previa al Titular a través del correo electrónico registrado, con al menos 15 días de anticipación a la entrada en vigor de los cambios sustanciales.
+
+10. CONTACTO
+
+Para cualquier consulta, reclamo o ejercicio de derechos relacionados con el tratamiento de datos personales:
+
+Correo: privacidad@conaiassist.co
+Web:    conaiassist.co
+
+Al aceptar esta Política, el Titular autoriza de manera previa, expresa, libre, voluntaria e informada a ConAIAssist para realizar el tratamiento de sus datos personales conforme a las finalidades aquí descritas.`;
+
+
+const TERMS_AND_CONDITIONS_TEXT = `TÉRMINOS Y CONDICIONES DE USO
+Versión ${LEGAL_VERSION_TERMS} — ${LEGAL_VERSION_DATE}
+
+Los presentes Términos y Condiciones regulan el uso del servicio CONAI Smartbill, en adelante "el Servicio", ofrecido por ConAIAssist.
+
+1. IDENTIFICACIÓN DEL PROVEEDOR
+
+Proveedor:    ConAIAssist
+Servicio:     CONAI Smartbill
+País:         Colombia
+Contacto:     soporte@conaiassist.co
+
+2. DEFINICIONES
+
+a) "Usuario" o "Cliente": persona jurídica que se registra en CONAI Smartbill para usar el Servicio.
+b) "Administrador": persona natural designada por el Cliente como representante con acceso master a la cuenta.
+c) "Sub-usuario": persona natural autorizada por el Administrador con acceso limitado al Servicio.
+d) "Factura electrónica": documento DIAN UBL 2.1 procesado a través del Servicio.
+e) "Software contable": sistema ERP del Cliente al cual el Servicio se conecta para registrar facturas.
+
+3. ACEPTACIÓN
+
+El uso del Servicio implica la aceptación plena y sin reservas de estos Términos y de la Política de Tratamiento de Datos Personales. La aceptación se realiza de manera expresa mediante la activación de las casillas correspondientes durante el registro de la empresa.
+
+4. DESCRIPCIÓN DEL SERVICIO
+
+CONAI Smartbill es un servicio de procesamiento automatizado de facturación electrónica que:
+
+a) Recibe facturas electrónicas DIAN por correo electrónico.
+b) Las clasifica mediante inteligencia artificial.
+c) Las enruta para aprobación según la estructura de departamentos configurada.
+d) Integra las facturas aprobadas con el software contable seleccionado por el Cliente.
+
+5. REGISTRO Y CUENTA
+
+El registro requiere proporcionar información veraz, completa y actualizada. El Cliente es responsable de:
+
+a) Mantener la confidencialidad de sus credenciales.
+b) Notificar inmediatamente cualquier uso no autorizado.
+c) Mantener actualizada la información de su empresa.
+d) Configurar correctamente la conexión con su software contable.
+
+6. FASE BETA
+
+EL SERVICIO SE ENCUENTRA ACTUALMENTE EN FASE BETA. Esto significa que:
+
+a) Pueden existir errores, interrupciones o limitaciones en la funcionalidad.
+b) No se garantizan niveles de servicio (SLA) específicos.
+c) Las copias de seguridad automáticas pueden no estar plenamente disponibles.
+d) ConAIAssist se reserva el derecho de modificar, suspender o discontinuar funcionalidades.
+
+El Cliente acepta el uso del Servicio en estas condiciones y asume los riesgos inherentes a la fase beta. Se recomienda al Cliente mantener respaldos independientes de la información crítica.
+
+7. OBLIGACIONES DEL CLIENTE
+
+El Cliente se obliga a:
+
+a) Usar el Servicio conforme a la ley colombiana y estos Términos.
+b) No utilizar el Servicio para fines ilícitos o que vulneren derechos de terceros.
+c) No intentar acceder a partes del Servicio que no le hayan sido autorizadas.
+d) Proporcionar credenciales válidas para los servicios externos integrados.
+e) Pagar las tarifas aplicables conforme al plan contratado (cuando aplique).
+
+8. OBLIGACIONES DEL PROVEEDOR
+
+ConAIAssist se obliga a:
+
+a) Prestar el Servicio con la diligencia esperada de un proveedor profesional en fase beta.
+b) Proteger los datos del Cliente conforme a la Política de Tratamiento de Datos.
+c) Notificar al Cliente cualquier incidente de seguridad que pueda afectar sus datos.
+d) Atender oportunamente las solicitudes de soporte por correo electrónico.
+
+9. TARIFAS
+
+Durante la fase beta, el Servicio se ofrece de forma gratuita o bajo condiciones especiales acordadas individualmente con cada Cliente. Al pasar a fase comercial, ConAIAssist notificará al Cliente con al menos 30 días de anticipación las tarifas aplicables.
+
+10. LIMITACIÓN DE RESPONSABILIDAD
+
+EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY:
+
+a) ConAIAssist no será responsable por daños indirectos, consecuenciales, lucro cesante o pérdida de datos derivados del uso del Servicio.
+b) La responsabilidad total de ConAIAssist por cualquier reclamación se limitará al monto pagado por el Cliente en los últimos 12 meses, o a un (1) Salario Mínimo Mensual Legal Vigente si no ha habido pagos.
+c) ConAIAssist no es responsable por errores en las facturas electrónicas generadas por los emisores, ni por la integridad de los datos recibidos vía DIAN o terceros.
+d) El Cliente reconoce que la inteligencia artificial puede presentar errores de clasificación y que la aprobación final de cada factura es responsabilidad del Cliente.
+
+11. PROPIEDAD INTELECTUAL
+
+Todos los derechos sobre el Servicio, incluyendo software, marcas, diseños y documentación, son propiedad exclusiva de ConAIAssist. El Cliente recibe únicamente una licencia limitada, no exclusiva y revocable para usar el Servicio conforme a estos Términos.
+
+12. PROTECCIÓN DE DATOS
+
+El tratamiento de datos personales se rige por la Política de Tratamiento de Datos Personales que el Cliente acepta separadamente.
+
+13. SUSPENSIÓN Y TERMINACIÓN
+
+ConAIAssist podrá suspender o terminar el Servicio en caso de:
+
+a) Incumplimiento de estos Términos por parte del Cliente.
+b) Uso ilícito o abusivo del Servicio.
+c) Falta de pago de las tarifas aplicables.
+d) Solicitud expresa del Cliente.
+
+El Cliente podrá terminar el Servicio en cualquier momento mediante solicitud al correo soporte@conaiassist.co.
+
+14. MODIFICACIONES
+
+ConAIAssist podrá modificar estos Términos con notificación previa al Cliente. Las modificaciones sustanciales entrarán en vigor 15 días después de la notificación. El uso continuado del Servicio implica aceptación de los nuevos Términos.
+
+15. LEY APLICABLE Y JURISDICCIÓN
+
+Estos Términos se rigen por las leyes de la República de Colombia. Las controversias se someterán a los jueces de Bogotá D.C., renunciando a cualquier otro fuero que pudiera corresponderles.
+
+16. CONTACTO
+
+Soporte:      soporte@conaiassist.co
+Legal:        legal@conaiassist.co
+Privacidad:   privacidad@conaiassist.co
+
+Al aceptar estos Términos, el Cliente declara haber leído, entendido y aceptado todas las disposiciones aquí establecidas.`;
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// LegalDocumentModal — modal para mostrar Política de Privacidad o T&C
+// Props:
+//   - title: string — encabezado del modal
+//   - content: string — texto del documento (whitespace preservado)
+//   - onClose: callback — cerrar modal
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function LegalDocumentModal({ title, content, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, maxWidth: 720, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+        <div style={{ padding: "20px 28px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>{title}</div>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
+        </div>
+        <div style={{ padding: "20px 28px", overflowY: "auto", flex: 1, fontSize: 12, color: "#334155", lineHeight: 1.7, whiteSpace: "pre-line", fontFamily: "inherit" }}>
+          {content}
+        </div>
+        <div style={{ padding: "14px 28px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+          <button onClick={onClose} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+ 
 function OnboardingScreen({ onBack }) {
   const [nit, setNit] = useState("");
   const [nombreEmpresa, setNombreEmpresa] = useState("");
