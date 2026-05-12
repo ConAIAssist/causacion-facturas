@@ -4658,7 +4658,7 @@ function DeletionGraceBanner({ deletedAt, graceDays = 30, onCancelled, authFetch
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // DASHBOARD (componente principal — modificado con tab 🚫 Rechazos)
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
-function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings }) {
+function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings, onEmailChanged }) {
   const [facturas, setFacturas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -5040,10 +5040,11 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
           session={session}
           authFetch={authFetch}
           onSuccess={(newEmail) => {
-            // Nota: NO actualizamos session.email runtime porque eso requeriría
-            // setSession() en App, no en Dashboard. El usuario verá el cambio
-            // reflejado tras logout/login (que es el flow esperado tras cambio
-            // de email).
+            // Email change fix may 9 2026: propagar el nuevo email a App
+            // para actualizar session + sessionStorage en runtime.
+            // El usuario ve el cambio reflejado inmediatamente en el header
+            // y al reabrir el modal — sin necesidad de logout/login.
+           if (onEmailChanged) onEmailChanged(newEmail);
           }}
           onClose={() => setShowChangeEmail(false)}
         />
@@ -5568,6 +5569,22 @@ function App() {
     setView("login");
   }
 
+  // Email change fix may 9 2026: tras confirmar cambio de email, actualizar
+  // session en memoria + sessionStorage para que el header y los modales
+  // reflejen el nuevo email sin necesidad de logout/login.
+  function handleEmailChanged(newEmail) {
+    if (!newEmail) return;
+    setSession((prev) => prev ? { ...prev, email: newEmail } : prev);
+    try {
+      const raw = sessionStorage.getItem("conai_session_v1");
+      if (raw) {
+        const stored = JSON.parse(raw);
+        stored.email = newEmail;
+        sessionStorage.setItem("conai_session_v1", JSON.stringify(stored));
+      }
+    } catch (e) { /* sessionStorage bloqueado: cambio sólo en memoria */ }
+  }
+
   // authFetch para usar en TwoFactorSettingsModal — manda token en body
   const authFetch = async (url, options = {}) => {
     if (!session) throw new Error("No session");
@@ -5696,6 +5713,7 @@ function App() {
           onLogout={handleLogout}
           onChangePassword={() => setView("change_voluntary")}
           openTwoFactorSettings={() => setShowTwoFactorSettings(true)}
+          onEmailChanged={handleEmailChanged}
         />
         {showTwoFactorSettings && (
           <TwoFactorSettingsModal
