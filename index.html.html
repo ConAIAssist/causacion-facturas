@@ -1855,6 +1855,249 @@ function ChangeEmailModal({ session, authFetch, onSuccess, onClose }) {
     </div>
   );
 }
+ // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE C — TRANSFER OWNERSHIP MODAL
+// Modal de 3 pasos para que el OWNER actual transfiera la propiedad a OTRO master.
+// La transferencia NO es inmediata: se envía email al target. El target debe aceptar dentro de 24h
+// (link → AcceptOwnershipLanding en ETAPA 6).
+// 
+// Mientras la transferencia está pendiente:
+//   - El owner ACTUAL sigue siendo owner
+//   - El owner puede cancelar con /cancel-ownership-transfer (sin friction)
+//   - Solo 1 transferencia activa a la vez por empresa
+// 
+// PASO A: warning + confirmación textual "TRANSFERIR PROPIEDAD A {nombre}"
+// PASO B: verificación 2FA
+// PASO C: success — email enviado al target
+// 
+// Props:
+//   - session: { nit, ... }
+//   - authFetch: helper
+//   - targetUser: { user_id, nombre, email, ... }
+//   - onSuccess: callback tras request exitoso
+//   - onClose: callback de cierre
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function TransferOwnershipModal({ session, authFetch, targetUser, onSuccess, onClose }) {
+  const [step, setStep] = useState("warning"); // warning | verify_2fa | success
+  const [confirmText, setConfirmText] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [targetMasked, setTargetMasked] = useState(null);
+  const expectedConfirm = `TRANSFERIR PROPIEDAD A ${(targetUser.nombre || targetUser.email || "").toUpperCase()}`;
+  const matchesConfirm = confirmText.trim().toUpperCase() === expectedConfirm;
+  function handleStartVerify() {
+    if (!matchesConfirm) return;
+    setError("");
+    setStep("verify_2fa");
+  }
+  async function handleConfirmTransfer(e) {
+    e.preventDefault();
+    setError("");
+    if (!/^\d{6}$/.test(totpCode)) {
+      setError("Ingresa el código de 6 dígitos de tu app de autenticación");
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data } = await authFetch(CONFIG.TRANSFER_REQUEST_URL, {
+        method: "POST",
+        body: JSON.stringify({
+          nit: session.nit,
+          target_user_id: targetUser.user_id,
+          totp_code: totpCode.trim(),
+        }),
+      });
+      if (data?.ok) {
+        setTargetMasked(data.target_masked || targetUser.email);
+        setStep("success");
+        if (onSuccess) onSuccess();
+      } else {
+        const errCode = data?.error_code;
+        const msgMap = {
+          'ACTOR_NOT_OWNER':         "Solo el OWNER puede transferir la propiedad.",
+          'TARGET_NOT_MASTER':       "El target debe ser un master de la empresa.",
+          'TARGET_NOT_ACTIVE':       "El target no está activo.",
+          'TARGET_ALREADY_OWNER':    "Ese usuario ya es el owner.",
+          'SELF_TRANSFER_FORBIDDEN': "No podés transferir la propiedad a vos mismo.",
+          'PENDING_ACTIVE':          "Ya hay una transferencia pendiente. Cancelala primero o esperá a que expire.",
+        };
+        setError(msgMap[errCode] || data?.message || "No se pudo iniciar la transferencia. Verificá el código y volvé a intentar.");
+        setTotpCode("");
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") {
+        setError(e.message || "Error de conexión.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+  // ─── PASO A: WARNING + CONFIRMACIÓN TEXTUAL ───
+  const renderWarning = () => (
+    <div>
+      <div style={{ background: "#fef3c7", border: "2px solid #fbbf24", borderRadius: 12, padding: 18, marginBottom: 18 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: "#92400e", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 22 }}>👑</span>
+          Transferir propiedad de la empresa
+        </div>
+        <div style={{ fontSize: 12, color: "#92400e", lineHeight: 1.7 }}>
+          Vas a transferir la propiedad a:
+          <div style={{ background: "#fff", borderRadius: 8, padding: "10px 14px", marginTop: 8, border: "1px solid #fde68a" }}>
+            <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>{targetUser.nombre}</div>
+            <div style={{ color: "#64748b", fontSize: 11, fontFamily: "monospace" }}>{targetUser.email}</div>
+          </div>
+          <div style={{ marginTop: 10 }}>Consecuencias:</div>
+          <ul style={{ margin: "6px 0 0 22px", padding: 0 }}>
+            <li>Se enviará un <strong>email de aceptación</strong> al target</li>
+            <li>El target tiene <strong>24 horas</strong> para aceptar (sino expira)</li>
+            <li>Mientras está pendiente, vos seguís siendo owner</li>
+            <li>Podés cancelar en cualquier momento antes que acepten</li>
+            <li>Si acepta, vos perdés el badge 👑 pero seguís siendo master</li>
+            <li>Solo el nuevo owner podrá transferir/eliminar la empresa</li>
+          </ul>
+        </div>
+      </div>
+      <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 14, border: "1px solid #e2e8f0" }}>
+        <div style={{ fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 8, letterSpacing: "0.05em" }}>
+          PARA CONFIRMAR, ESCRIBÍ EXACTAMENTE:
+        </div>
+        <div style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: "#0f172a", padding: "8px 12px", background: "#fff", borderRadius: 6, border: "1px solid #e2e8f0", marginBottom: 10, letterSpacing: "0.03em" }}>
+          {expectedConfirm}
+        </div>
+        <input
+          type="text"
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          placeholder="Escribí el texto de arriba exactamente"
+          autoFocus
+          style={{
+            width: "100%", padding: "10px 14px", borderRadius: 10,
+            border: `1px solid ${matchesConfirm ? "#86efac" : "#e2e8f0"}`,
+            background: matchesConfirm ? "#f0fdf4" : "#fff",
+            fontSize: 13, fontFamily: "monospace",
+            boxSizing: "border-box",
+          }}
+        />
+        {confirmText && !matchesConfirm && (
+          <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
+            Debe coincidir exactamente (mayúsculas)
+          </div>
+        )}
+        {matchesConfirm && (
+          <div style={{ fontSize: 10, color: "#16a34a", marginTop: 4, fontWeight: 600 }}>
+            ✓ Texto correcto
+          </div>
+        )}
+      </div>
+      {error && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <button type="button" onClick={onClose} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#475569", fontFamily: "inherit" }}>
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={handleStartVerify}
+          disabled={!matchesConfirm}
+          style={{
+            padding: "10px 24px", borderRadius: 8, border: "none",
+            background: !matchesConfirm ? "#fcd34d" : "#d97706",
+            color: "#fff", fontSize: 13, fontWeight: 700,
+            cursor: !matchesConfirm ? "not-allowed" : "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          Continuar →
+        </button>
+      </div>
+    </div>
+  );
+  // ─── PASO B: VERIFICACIÓN 2FA ───
+  const renderVerify2FA = () => (
+    <form onSubmit={handleConfirmTransfer}>
+      <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12, color: "#92400e", lineHeight: 1.5 }}>
+        🔐 <strong>Verificación de seguridad</strong>. Por la criticidad de esta acción, necesitamos validar tu identidad con 2FA. Ingresá el código de 6 dígitos de tu app.
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>
+          CÓDIGO DE 6 DÍGITOS
+        </label>
+        <input
+          type="text"
+          value={totpCode}
+          onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          placeholder="123456"
+          autoFocus
+          disabled={loading}
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          style={{ width: "100%", padding: "14px 16px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 24, fontFamily: "monospace", textAlign: "center", letterSpacing: "0.4em", boxSizing: "border-box" }}
+        />
+      </div>
+      {error && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+        <button type="button" onClick={() => { setStep("warning"); setError(""); setTotpCode(""); }} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
+          ← Volver
+        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button type="button" onClick={onClose} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", color: "#475569", fontFamily: "inherit" }}>
+            Cancelar
+          </button>
+          <button type="submit" disabled={loading || totpCode.length !== 6} style={{ padding: "10px 24px", borderRadius: 8, border: "none", background: loading || totpCode.length !== 6 ? "#fcd34d" : "#d97706", color: "#fff", fontSize: 13, fontWeight: 700, cursor: loading || totpCode.length !== 6 ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+            {loading ? <span><span className="spin">⟳</span> Procesando...</span> : "👑 Enviar solicitud"}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+  // ─── PASO C: SUCCESS ───
+  const renderSuccess = () => (
+    <div>
+      <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 12, padding: 18, marginBottom: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#166534", marginBottom: 8 }}>
+          ✓ Solicitud de transferencia enviada
+        </div>
+        <div style={{ fontSize: 13, color: "#166534", lineHeight: 1.6 }}>
+          Enviamos un email a <strong>{targetMasked || targetUser.email}</strong> con un link para aceptar la transferencia.
+          <br /><br />
+          La transferencia es efectiva <strong>SOLO si el target acepta</strong>. Tiene <strong>24 horas</strong> antes de que expire.
+        </div>
+      </div>
+      <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 12, color: "#0369a1", lineHeight: 1.5 }}>
+        💡 <strong>Tip:</strong> Si cambiás de opinión antes que acepten, podés cancelar la transferencia desde un endpoint (próximamente UI). Mientras tanto, vos seguís siendo owner.
+      </div>
+      <button onClick={onClose} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+        Cerrar
+      </button>
+    </div>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 110, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 560, width: "100%", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#d97706", fontWeight: 700 }}>ACCIÓN CRÍTICA</div>
+            <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4, color: "#0f172a" }}>
+              {step === "success" ? "✓ Transferencia solicitada" : "👑 Transferir propiedad"}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>×</button>
+        </div>
+        {step === "warning" && renderWarning()}
+        {step === "verify_2fa" && renderVerify2FA()}
+        {step === "success" && renderSuccess()}
+      </div>
+    </div>
+  );
+}
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ⭐ FASE C — TEAM MODAL (reemplaza SubUsersModal viejo)
 // Gestión completa del equipo de la empresa con 2 tabs: Masters + Sub-usuarios.
@@ -1884,6 +2127,8 @@ function TeamModal({ session, onClose, authFetch }) {
   const [activeTab, setActiveTab] = useState("masters"); // masters | sub_users
   const [showCreate, setShowCreate] = useState(false);
   const [busyAction, setBusyAction] = useState(null); // { type, user_id }
+ // ⭐ FASE C — state para abrir TransferOwnershipModal nested
+  const [transferTarget, setTransferTarget] = useState(null);
   // Form de creación
   const [newNombre, setNewNombre] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -2107,6 +2352,13 @@ function TeamModal({ session, onClose, authFetch }) {
               {isBusy && busyAction?.type === "demote" ? "..." : "⬇ Degradar"}
             </button>
           )}
+         {/* ⭐ FASE C — Transferir propiedad (solo si actor es owner, target es master NO owner NO self) */}
+          {isMaster && !u.is_owner && !u.is_self && session.is_owner === true && (
+            <button onClick={() => setTransferTarget(u)} disabled={isBusy} title="Transferir propiedad a este master"
+              style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fcd34d", background: "#fffbeb", fontSize: 10, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer", color: "#92400e" }}>
+              👑 Transferir
+            </button>
+          )}
           {/* Reset 2FA (solo sub-users con 2FA activo, no self) */}
           {!isMaster && u.twofa_enabled && !u.is_self && (
             <button onClick={() => handleReset2FA(u)} disabled={isBusy} title="Resetear 2FA"
@@ -2210,6 +2462,19 @@ function TeamModal({ session, onClose, authFetch }) {
           </div>
         )}
       </div>
+     {/* ⭐ FASE C — Nested TransferOwnershipModal */}
+        {transferTarget && (
+          <TransferOwnershipModal
+            session={session}
+            authFetch={authFetch}
+            targetUser={transferTarget}
+            onSuccess={() => {
+              // No cerramos aún — dejamos al usuario ver el step "success" del modal
+              fetchUsers(); // refrescar lista
+            }}
+            onClose={() => setTransferTarget(null)}
+          />
+        )}
     </div>
   );
 }
