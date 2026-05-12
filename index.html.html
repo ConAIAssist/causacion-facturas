@@ -560,6 +560,9 @@ function OnboardingScreen({ onBack }) {
   const [emailMaster, setEmailMaster] = useState("");
   const [softwareContable, setSoftwareContable] = useState("");
   const [actividadEconomica, setActividadEconomica] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(null); // null | 'terms' | 'privacy'
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({}); // { nit: "...", email_master: "..." }
@@ -576,6 +579,8 @@ function OnboardingScreen({ onBack }) {
     if (!emailRegex.test(emailLower) || emailLower.length > 254) errs.email_master = "Formato de email inválido";
     if (!ONBOARDING_SOFTWARE_OPTIONS.includes(softwareContable)) errs.software_contable = "Selecciona un software contable";
     if (actividadEconomica.trim().length < 10 || actividadEconomica.trim().length > 1000) errs.actividad_economica = "Actividad económica debe tener entre 10 y 1000 caracteres";
+    if (!acceptedTerms) errs.accepted_terms = "Debes aceptar los Términos y Condiciones para continuar";
+    if (!acceptedPrivacy) errs.accepted_privacy = "Debes aceptar la Política de Tratamiento de Datos para continuar";
     return errs;
   }
 
@@ -597,6 +602,8 @@ function OnboardingScreen({ onBack }) {
           email_master: emailMaster.trim().toLowerCase(),
           software_contable: softwareContable,
           actividad_economica: actividadEconomica.trim(),
+          accepted_terms: acceptedTerms,
+          accepted_privacy: acceptedPrivacy,
         }),
       });
       const text = await res.text();
@@ -652,9 +659,10 @@ function OnboardingScreen({ onBack }) {
   const fieldHintStyle = { fontSize: 10, color: "#94a3b8", marginTop: 4 };
   const fieldErrStyle  = { fontSize: 10, color: "#ef4444", marginTop: 4, fontWeight: 600 };
 
-  const canSubmit = nit && nombreEmpresa && emailMaster && softwareContable && actividadEconomica;
+  const canSubmit = nit && nombreEmpresa && emailMaster && softwareContable && actividadEconomica && acceptedTerms && acceptedPrivacy;
 
   return (
+    <>
     <AuthLayout title="Registra tu empresa" subtitle="Crea tu cuenta de administrador en CONAI Smartbill">
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: 14 }}>
@@ -701,6 +709,39 @@ function OnboardingScreen({ onBack }) {
             : <div style={fieldHintStyle}>{actividadEconomica.trim().length}/1000 caracteres (mínimo 10)</div>}
         </div>
 
+        {/* Habeas Data (Ley 1581 Colombia) — aceptación expresa */}
+        <div style={{ marginBottom: 14, padding: "12px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10 }}>
+          <div style={{ fontSize: 10, letterSpacing: "0.1em", color: "#475569", fontWeight: 700, marginBottom: 10 }}>ACEPTACIÓN LEGAL</div>
+
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", marginBottom: 10, fontSize: 12, color: "#334155", lineHeight: 1.5 }}>
+            <input type="checkbox" checked={acceptedTerms} onChange={(e) => setAcceptedTerms(e.target.checked)} disabled={loading}
+              style={{ marginTop: 3, flexShrink: 0, cursor: "pointer" }} />
+            <span>
+              He leído y acepto los{" "}
+              <button type="button" onClick={() => setShowLegalModal('terms')} disabled={loading}
+                style={{ background: "none", border: "none", padding: 0, color: "#0f172a", fontWeight: 700, textDecoration: "underline", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>
+                Términos y Condiciones
+              </button>
+              {" "}del Servicio.
+            </span>
+          </label>
+          {fieldErrors.accepted_terms && <div style={{ ...fieldErrStyle, marginLeft: 26, marginTop: -6, marginBottom: 8 }}>{fieldErrors.accepted_terms}</div>}
+
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", fontSize: 12, color: "#334155", lineHeight: 1.5 }}>
+            <input type="checkbox" checked={acceptedPrivacy} onChange={(e) => setAcceptedPrivacy(e.target.checked)} disabled={loading}
+              style={{ marginTop: 3, flexShrink: 0, cursor: "pointer" }} />
+            <span>
+              Autorizo de manera previa, expresa, libre, voluntaria e informada el tratamiento de mis datos personales conforme a la{" "}
+              <button type="button" onClick={() => setShowLegalModal('privacy')} disabled={loading}
+                style={{ background: "none", border: "none", padding: 0, color: "#0f172a", fontWeight: 700, textDecoration: "underline", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>
+                Política de Tratamiento de Datos
+              </button>
+              {" "}(Ley 1581 de 2012, Colombia).
+            </span>
+          </label>
+          {fieldErrors.accepted_privacy && <div style={{ ...fieldErrStyle, marginLeft: 26, marginTop: 4 }}>{fieldErrors.accepted_privacy}</div>}
+        </div>
+
         {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>{error}</div>}
 
         <button type="submit" disabled={loading || !canSubmit} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", fontSize: 14, fontWeight: 700, cursor: loading || !canSubmit ? "not-allowed" : "pointer", background: loading || !canSubmit ? "#94a3b8" : "#0f172a", color: "#fff", marginBottom: 10, opacity: loading || !canSubmit ? 0.6 : 1 }}>
@@ -711,6 +752,21 @@ function OnboardingScreen({ onBack }) {
         </button>
       </form>
     </AuthLayout>
+   {showLegalModal === 'terms' && (
+      <LegalDocumentModal
+        title={`Términos y Condiciones — v${LEGAL_VERSION_TERMS}`}
+        content={TERMS_AND_CONDITIONS_TEXT}
+        onClose={() => setShowLegalModal(null)}
+      />
+    )}
+    {showLegalModal === 'privacy' && (
+      <LegalDocumentModal
+        title={`Política de Tratamiento de Datos — v${LEGAL_VERSION_PRIVACY}`}
+        content={PRIVACY_POLICY_TEXT}
+        onClose={() => setShowLegalModal(null)}
+      />
+    )}
+    </>
   );
 }
 
