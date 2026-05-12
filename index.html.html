@@ -4442,11 +4442,14 @@ function AssistantChat({ session, authFetch, onClose, facturas }) {
         body: JSON.stringify({
           nit: session.nit,
           messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
-          context: {
+         context: {
             nit: session.nit,
             empresa: session.empresa,
             software_contable: session.software_contable,
             actividad: session.actividad,
+            email: session.email,
+            role: session.role,
+            is_owner: session.is_owner,
             dashboardStats,
           }
         }),
