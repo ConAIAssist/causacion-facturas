@@ -1856,6 +1856,163 @@ function ChangeEmailModal({ session, authFetch, onSuccess, onClose }) {
   );
 }
  // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// ⭐ FASE C — ACCEPT OWNERSHIP MODAL
+// Modal que aparece automáticamente cuando el target del transfer hace click en el email
+// y se loguea. Le da 3 opciones: Aceptar (SWAP), Rechazar (cancelar), Más tarde (deferir).
+// 
+// Props:
+//   - token: string (UUID del transfer)
+//   - session: { nit, ... }
+//   - authFetch: helper
+//   - onClose: callback de "Más tarde" — solo cierra el modal, mantiene el token guardado
+//   - onAccepted: callback tras accept exitoso — dispara logout para refrescar session
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+function AcceptOwnershipModal({ token, session, authFetch, onClose, onAccepted }) {
+  const [action, setAction] = useState(null); // null | 'accepting' | 'rejecting' | 'accepted' | 'rejected'
+  const [error, setError] = useState("");
+  async function handleAccept() {
+    if (!confirm(
+      `¿Aceptar la propiedad de la empresa ${session.empresa || session.nit}?\n\n` +
+      `Vas a ser el nuevo OWNER. El owner actual perderá el badge 👑 pero seguirá siendo master.`
+    )) return;
+    setAction("accepting"); setError("");
+    try {
+      const { data } = await authFetch(CONFIG.TRANSFER_CONFIRM_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, token: token }),
+      });
+      if (data?.ok) {
+        setAction("accepted");
+      } else {
+        const errCode = data?.error_code;
+        const msgMap = {
+          'TOKEN_NOT_FOUND':         "El link expiró o no es válido. Pedile al owner que envíe uno nuevo.",
+          'TOKEN_EXPIRED':           "El link expiró (24h). Pedile al owner que envíe uno nuevo.",
+          'TOKEN_CONSUMED':          "Este link ya fue usado.",
+          'NOT_TARGET':              "Este link no es para tu cuenta.",
+          'ACTOR_NOT_MASTER':        "Tu cuenta dejó de ser master. No podés aceptar.",
+        };
+        setError(msgMap[errCode] || data?.message || "No se pudo aceptar la transferencia.");
+        setAction(null);
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") setError(e.message);
+      setAction(null);
+    }
+  }
+  async function handleReject() {
+    if (!confirm("¿Rechazar esta transferencia de propiedad?")) return;
+    setAction("rejecting"); setError("");
+    try {
+      const { data } = await authFetch(CONFIG.TRANSFER_REJECT_URL, {
+        method: "POST",
+        body: JSON.stringify({ nit: session.nit, token: token }),
+      });
+      if (data?.ok) {
+        setAction("rejected");
+      } else {
+        setError(data?.message || "No se pudo rechazar la transferencia.");
+        setAction(null);
+      }
+    } catch (e) {
+      if (e.message !== "SESSION_EXPIRED") setError(e.message);
+      setAction(null);
+    }
+  }
+  // ─── Render por step ───
+  if (action === "accepted") {
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 110, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 460, width: "100%", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+          <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#166534", marginBottom: 8 }}>
+              ✓ ¡Sos el nuevo owner! 👑
+            </div>
+            <div style={{ fontSize: 13, color: "#166534", lineHeight: 1.6 }}>
+              Ahora sos el dueño de la empresa <strong>{session.empresa || session.nit}</strong>. Tenés todos los permisos: transferir, eliminar empresa, gestionar masters.
+              <br /><br />
+              Vamos a cerrar tu sesión actual para refrescar tu perfil. Volvé a iniciar sesión.
+            </div>
+          </div>
+          <button onClick={onAccepted} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            Cerrar sesión y volver a iniciar
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (action === "rejected") {
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 110, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 460, width: "100%", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+          <div style={{ background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "#475569", marginBottom: 8 }}>
+              Transferencia rechazada
+            </div>
+            <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.6 }}>
+              Rechazaste la transferencia. El owner actual mantiene la propiedad.
+            </div>
+          </div>
+          <button onClick={onClose} style={{ width: "100%", padding: 12, borderRadius: 10, border: "none", background: "#0f172a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            Continuar al dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // Default: pantalla de decisión
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.6)", backdropFilter: "blur(4px)", zIndex: 110, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div className="fade-in" style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 500, width: "100%", boxShadow: "0 25px 80px rgba(0,0,0,0.4)" }}>
+        <div style={{ fontSize: 10, letterSpacing: "0.2em", color: "#d97706", fontWeight: 700 }}>SOLICITUD PENDIENTE</div>
+        <div style={{ fontSize: 18, fontWeight: 800, marginTop: 4, color: "#0f172a", marginBottom: 16 }}>
+          👑 Transferencia de propiedad
+        </div>
+        <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 12, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, color: "#92400e", lineHeight: 1.6 }}>
+            El owner actual de la empresa <strong>{session.empresa || session.nit}</strong> te ha solicitado que aceptes la propiedad de la cuenta.
+            <br /><br />
+            Si aceptás:
+            <ul style={{ margin: "6px 0 0 22px", padding: 0 }}>
+              <li>Vas a ser el nuevo OWNER 👑</li>
+              <li>Tendrás permisos completos sobre la empresa</li>
+              <li>El owner actual seguirá siendo master pero sin badge 👑</li>
+            </ul>
+          </div>
+        </div>
+        {error && (
+          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#991b1b", marginBottom: 12 }}>
+            {error}
+          </div>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <button
+            onClick={handleAccept}
+            disabled={action !== null}
+            style={{ width: "100%", padding: 14, borderRadius: 10, border: "none", background: action === "accepting" ? "#94a3b8" : "#16a34a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: action !== null ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+            {action === "accepting" ? <span><span className="spin">⟳</span> Aceptando...</span> : "✓ Aceptar y ser el nuevo owner"}
+          </button>
+          <button
+            onClick={handleReject}
+            disabled={action !== null}
+            style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #fecaca", background: "#fff", color: "#b91c1c", fontSize: 13, fontWeight: 700, cursor: action !== null ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+            {action === "rejecting" ? "Rechazando..." : "✕ Rechazar transferencia"}
+          </button>
+          <button
+            onClick={onClose}
+            disabled={action !== null}
+            style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontSize: 12, fontWeight: 600, cursor: action !== null ? "not-allowed" : "pointer", fontFamily: "inherit" }}>
+            Decidir más tarde
+          </button>
+        </div>
+        <div style={{ fontSize: 10, color: "#94a3b8", textAlign: "center", marginTop: 12 }}>
+          El link expira 24h después de enviado. Después tendrás que pedir uno nuevo.
+        </div>
+      </div>
+    </div>
+  );
+}
+ // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // ⭐ FASE C — TRANSFER OWNERSHIP MODAL
 // Modal de 3 pasos para que el OWNER actual transfiera la propiedad a OTRO master.
 // La transferencia NO es inmediata: se envía email al target. El target debe aceptar dentro de 24h
@@ -4515,6 +4672,8 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
  // ⭐ FASE C — modales de owner management
   const [showChangeEmail, setShowChangeEmail] = useState(false);
  const [showDeleteEmpresa, setShowDeleteEmpresa] = useState(false);
+ // ⭐ FASE C — modal de aceptar transferencia (auto-abre si hay token pending)
+  const [pendingTransferToken, setPendingTransferToken] = useState(() => sessionStorage.getItem("conai_pending_transfer_token") || null);
   const [activeTab, setActiveTab] = useState("facturas");
   const [expandedCufe, setExpandedCufe] = useState(null);
   const [search, setSearch] = useState("");
@@ -4897,6 +5056,23 @@ function Dashboard({ session, onLogout, onChangePassword, openTwoFactorSettings 
             setEmpresaDeletedAt(deletedAtIso);
           }}
           onClose={() => setShowDeleteEmpresa(false)}
+        />
+      )}
+     {pendingTransferToken && (
+        <AcceptOwnershipModal
+          token={pendingTransferToken}
+          session={session}
+          authFetch={authFetch}
+          onClose={() => {
+            sessionStorage.removeItem("conai_pending_transfer_token");
+            setPendingTransferToken(null);
+          }}
+          onAccepted={() => {
+            // Después de aceptar, logout para que el siguiente login hidrate con is_owner=true
+            sessionStorage.removeItem("conai_pending_transfer_token");
+            setPendingTransferToken(null);
+            onLogout();
+          }}
         />
       )}
 
@@ -5322,6 +5498,16 @@ function App() {
   // TTL local de 24h coincide con expires_in del JWT; backend igual rechaza si JWT venció.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    
+    // ⭐ FASE C — Detectar ?transfer_token=XXX en URL y guardarlo para procesarlo tras login
+    const tt = params.get("transfer_token");
+    if (tt && /^[0-9a-f-]{30,40}$/i.test(tt)) {
+      sessionStorage.setItem("conai_pending_transfer_token", tt);
+      // Limpiar URL para no dejar el token visible
+      const cleanUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+    
     if (params.get("reset_token") || params.get("token")) return;
     try {
       const raw = sessionStorage.getItem("conai_session_v1");
