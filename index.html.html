@@ -443,11 +443,12 @@ function LoginScreen({ onLogin, onForgotPassword, onRequirePasswordChange, onReq
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>NIT DE LA EMPRESA</label>
-          <input type="text" value={nit} onChange={(e) => setNit(e.target.value)} placeholder="Ej: 800456789" autoFocus disabled={loading}
+          <input type="text" value={nit} onChange={(e) => setNit(e.target.value)} placeholder="Ej: 900123456 (9 dígitos)" autoFocus disabled={loading}
             style={{ width: "100%", padding: "12px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 15 }} />
-          <div style={{ fontSize: 11, color: "#b91c1c", marginTop: 6, fontWeight: 600, background: "#fef2f2", padding: "8px 12px", borderRadius: 6, border: "1px solid #fecaca", lineHeight: 1.4 }}>
-  ⚠ <strong>IMPORTANTE:</strong> Solo números, <strong>SIN dígito de verificación</strong>. Si tu NIT es <code style={{ background: "#fff", padding: "1px 6px", borderRadius: 3, fontWeight: 700 }}>900.123.456-7</code>, escribe solo <code style={{ background: "#fff", padding: "1px 6px", borderRadius: 3, fontWeight: 700 }}>900123456</code>
-</div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 6, display: "flex", alignItems: "center", gap: 6, lineHeight: 1.5 }}>
+           <span style={{ color: "#94a3b8", fontSize: 12 }}>ⓘ</span>
+           <span>Solo números, sin dígito de verificación. Ej: <strong style={{ color: "#0f172a", fontFamily: "ui-monospace,monospace" }}>900123456</strong></span>
+          </div>
         </div>
         <div style={{ marginBottom: 14 }}>
           <label style={{ display: "block", fontSize: 11, color: "#475569", fontWeight: 600, marginBottom: 6, letterSpacing: "0.05em" }}>CORREO ELECTRÓNICO</label>
